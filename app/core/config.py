@@ -9,6 +9,9 @@ class Settings(BaseSettings):
     return_zero_client_id: str
     return_zero_client_secret: str
 
+    # OpenRouter API
+    openrouter_api_key: str
+
     # 파일 저장 경로
     output_dir: str = "outputs"
 

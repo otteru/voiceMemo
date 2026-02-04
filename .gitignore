@@ -49,6 +49,9 @@ output.txt
 *.wav
 *.mp3
 
+# 출력 파일 폴더
+outputs/
+
 
 # Jupyter Notebook
 .ipynb_checkpoints
