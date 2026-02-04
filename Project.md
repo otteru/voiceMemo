@@ -6,28 +6,21 @@ https://github.com/rtzr/Awesome-Korean-Speech-Recognition?tab=readme-ov-file#%ED
 
 https://developers.rtzr.ai/docs/authentications/
 
-실행 방법
-1. 테스트용 오디오 파일 준비
-프로젝트 폴더에 test_audio.wav 파일을 넣어주세요.
+# 노션 api 관련 
 
-지원 형식: wav, mp3, m4a, flac 등
-다른 파일명 사용 시 test_stt.py:17에서 경로 수정
-2. 패키지 설치
+**공식 홈페이지**
+https://developers.notion.com/reference/intro
 
-pip install -r requirements.txt
-3. 실행
+**SDK**
+공식적으로는 javascript SDK 와 cURL으로만 지원하기에 
+https://github.com/ramnes/notion-sdk-py
+커뮤니티에서 만든 sdk 사용
 
-python test_stt.py
-4. 결과 확인
-콘솔에 실시간으로 변환 텍스트 출력
-output.txt 파일에 최종 결과 저장
-주의사항
-sample_rate 조정: 오디오 파일의 샘플링 레이트에 맞춰야 합니다.
+사용자가 입력해야 하는 것 
+1. notion 토큰
+2. notion 위치 url
 
-일반 녹음: 16000 Hz (기본값)
-고품질: 44100 Hz 또는 48000 Hz
-파일 속성 확인 방법:
+## 위치
 
-
-ffprobe test_audio.wav
-테스트할 오디오 파일 있으면 바로 실행해보세요!
+사용자가 url로 입력하게 하고 거기에 그냥 적어주는게 일단은 베스트일 듯 
+물론 데이터베이스 만들어주고 할 수 있지만 그게 오히려 자율성을 해칠 수 있어서 그건 나중에 option으로 넣어야 할 듯

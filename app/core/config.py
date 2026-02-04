@@ -12,6 +12,10 @@ class Settings(BaseSettings):
     # OpenRouter API
     openrouter_api_key: str
 
+    # Notion API
+    notion_api_key: str
+    notion_page_url: Optional[str] = None  # 기본 페이지 URL (선택)
+
     # 파일 저장 경로
     output_dir: str = "outputs"
 
