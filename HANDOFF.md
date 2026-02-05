@@ -117,7 +117,7 @@ voiceMemo/
 
 ## 현재 상태
 
-### 전체 파이프라인 완성 ✅
+### Backend 파이프라인 완성 ✅
 ```
 오디오 파일 → STT (Return Zero) → LLM 정리 (OpenRouter) → Notion 저장 ✅
 ```
@@ -127,34 +127,99 @@ voiceMemo/
 - **Notion 연동 테스트**: 페이지 생성 성공 ✅
 - 실시간 스트리밍 방식으로 결과 수신 확인
 
+### Frontend 구조 개선 완료 ✅ (2026-02-05)
+
+#### 완료된 작업
+1. **타입 정의 파일 분리** → `frontend/types/index.ts` ✅
+   - AppState, ProcessingStep, Recording 등 모든 타입 정의
+
+2. **API 레이어 구조** → `frontend/lib/api.ts` ✅
+   - recordingsApi: list, get, create, delete, getStatus
+   - notionApi: checkConnection, saveConfig, disconnect, save
+   - httpOnly 쿠키 지원 (credentials: 'include')
+   - 에러 핸들링 포함 (ApiError class)
+
+3. **입력 검증 추가** → `frontend/lib/validations.ts` ✅
+   - Zod 스키마 정의 (Notion token, Database ID 등)
+   - safeValidate 유틸리티 함수
+   - `app/settings/page.tsx`에 적용
+
+4. **환경 변수 설정** ✅
+   - `.env.example`, `.env.local` 생성
+   - `NEXT_PUBLIC_API_URL=http://localhost:8000` 설정
+
+5. **에러 처리 개선** ✅
+   - `app/layout.tsx` - Toaster 컴포넌트 추가
+   - `app/page.tsx` - 마이크 권한 에러 처리
+   - `app/settings/page.tsx` - 저장/해제 알림
+   - Toast 알림 (sonner) 전역 적용
+
+6. **성능 최적화** ✅
+   - useCallback 적용: handleRecordToggle, handleSave, handleReset, formatTime
+   - React.memo 적용: FeatureCard 컴포넌트
+
+#### 🚨 알려진 보안 이슈 (Backend 구현 시 해결 예정)
+- **Notion Token을 localStorage에 평문 저장**
+  - ❌ 현재: localStorage에 평문 저장 (XSS 취약)
+  - ✅ 계획: httpOnly 쿠키 세션에 저장
+
 ## 다음에 해야 할 작업
 
-### Phase 1: 전체 파이프라인 통합 테스트 (다음 작업)
-1. 통합 테스트 스크립트 작성 (`tests/test_pipeline.py`)
-   - STT → LLM → Notion 전체 흐름 테스트
-   - 오디오 파일 입력 → Notion 페이지 생성 확인
-2. 에러 핸들링 강화
-3. 로깅 추가
+### 🔥 우선순위 1: FastAPI Backend 구축 (다음 작업)
 
-### Phase 2: FastAPI 웹 서버
-1. 오디오 업로드 API (`app/api/routes/upload.py`)
-2. 실시간 스트리밍 WebSocket 엔드포인트
-3. 강의 처리 API (`app/api/routes/lecture.py`)
-   - STT → LLM → Notion 통합
+#### 1.1 프로젝트 기본 구조
+- [ ] FastAPI 프로젝트 초기화 (backend/ 폴더)
+- [ ] 폴더 구조 생성
+  ```
+  backend/
+  ├── app/
+  │   ├── main.py              # FastAPI 앱
+  │   ├── api/                 # API 라우터
+  │   │   ├── recordings.py
+  │   │   └── notion.py
+  │   ├── services/            # 비즈니스 로직
+  │   │   ├── stt.py          # 기존 rtzr_client.py 활용
+  │   │   ├── ai_summary.py   # 기존 llm_summarizer.py 활용
+  │   │   └── notion.py       # 기존 notion_client.py 활용
+  │   └── core/
+  │       ├── config.py       # 기존 파일 활용
+  │       └── security.py     # 세션/인증 관리
+  ```
 
-### Phase 3: 프론트엔드
-1. 웹 녹음 인터페이스 (HTML + JavaScript)
-2. Web Audio API로 마이크 녹음
-3. WebSocket으로 실시간 전송
-4. 진행 상황 표시 UI
+#### 1.2 인증/세션 관리
+- [ ] httpOnly 쿠키 기반 세션 구현
+- [ ] Notion 토큰을 서버 세션에 저장 (localStorage 대체)
+- [ ] CORS 설정 (http://localhost:3000 허용)
 
-### Phase 4: LangGraph 고도화 (선택)
-1. LangGraph 워크플로우 구현 (`app/langgraph/`)
-   - 요약 노드
-   - 키워드 추출 노드
-   - 구조화 노드
-   - 조건부 분기 (요약 품질 검증)
-2. 복잡한 워크플로우로 전환
+#### 1.3 Notion API 엔드포인트
+- [ ] `POST /api/notion/config` - Notion 설정 저장 (세션)
+- [ ] `GET /api/notion/status` - 연결 상태 확인
+- [ ] `POST /api/notion/disconnect` - 연결 해제
+- [ ] `POST /api/notion/save` - 노션에 페이지 생성
+
+#### 1.4 녹음 처리 API
+- [ ] `POST /api/recordings` - 오디오 파일 업로드 및 처리
+- [ ] `GET /api/recordings` - 녹음 목록 조회
+- [ ] `GET /api/recordings/{id}` - 녹음 상세
+- [ ] `GET /api/recordings/{id}/status` - 처리 상태 (폴링)
+- [ ] `DELETE /api/recordings/{id}` - 녹음 삭제
+
+#### 1.5 기존 서비스 통합
+- [ ] `rtzr_client.py` → `app/services/stt.py` 통합
+- [ ] `llm_summarizer.py` → `app/services/ai_summary.py` 통합
+- [ ] `notion_client.py` → `app/services/notion.py` 통합
+- [ ] 비동기 처리 (BackgroundTasks 또는 Celery)
+
+### 우선순위 2: Frontend-Backend 연동
+- [ ] API 호출 테스트
+- [ ] localStorage → httpOnly 쿠키로 변경
+- [ ] 실제 데이터로 UI 테스트
+- [ ] 전체 플로우 테스트 (녹음 → STT → AI → Notion)
+
+### 우선순위 3: 통합 테스트 및 배포
+- [ ] 전체 파이프라인 통합 테스트
+- [ ] E2E 테스트
+- [ ] 배포 설정 (Vercel + Railway/Render)
 
 ## 주요 학습 내용
 
@@ -214,7 +279,7 @@ voiceMemo/
 
 ## 관련 파일
 
-### 핵심 파일
+### Backend 핵심 파일
 - `app/services/rtzr_client.py` - Return Zero STT 클라이언트
 - `app/services/llm_summarizer.py` - LLM 요약 서비스
 - `app/services/notion_client.py` - Notion API 클라이언트
@@ -223,6 +288,17 @@ voiceMemo/
 - `tests/test_llm_summary.py` - LLM 요약 테스트
 - `tests/test_notion.py` - Notion 연동 테스트
 - `.env` - API 인증 정보
+
+### Frontend 핵심 파일
+- `frontend/types/index.ts` - 전역 타입 정의
+- `frontend/lib/api.ts` - API 레이어 (Backend 호출)
+- `frontend/lib/validations.ts` - Zod 입력 검증
+- `frontend/app/page.tsx` - 메인 페이지 (녹음 UI)
+- `frontend/app/recordings/page.tsx` - 녹음 기록
+- `frontend/app/settings/page.tsx` - 설정 (Notion 연동)
+- `frontend/components/record-button.tsx` - 녹음 버튼
+- `frontend/components/processing-status.tsx` - 처리 상태
+- `frontend/.env.local` - 환경 변수 (API URL)
 
 ### 출력 파일
 - `outputs/audio/test_audio.wav` - 테스트 오디오
@@ -243,27 +319,102 @@ voiceMemo/
 - [notion-sdk-py GitHub](https://github.com/ramnes/notion-sdk-py)
 
 ## 마지막 상태
-- Python 환경: conda (fastapi)
-- Python 버전: 3.13
-- 브랜치: main
-- 마지막 작업: Notion API 연동 완료
-- 테스트 상태:
+- **날짜**: 2026-02-05
+- **Python 환경**: conda (fastapi), Python 3.13
+- **Node 환경**: Node.js (Next.js 16, React 19)
+- **브랜치**: main
+- **마지막 작업**:
+  - Backend: Notion API 연동 완료 ✅
+  - Frontend: 구조 개선 완료 ✅
+- **테스트 상태**:
   - STT 변환 성공 ✅
   - LLM 요약 성공 ✅
   - Notion 페이지 생성 성공 ✅
-- **다음 단계**: 전체 파이프라인 통합 테스트
+  - Frontend 빌드: 미테스트 (Backend 없음)
+- **컨텍스트 사용량**: ~77k 토큰
+- **다음 단계**: FastAPI Backend 구축 (Frontend와 연동)
 
-## 새 세션 시작 시
-1. `HANDOFF.md`와 `CLAUDE.md` 읽기
-2. 환경 확인: `conda activate fastapi`
-3. 의존성 확인: `pip list | grep -E "langchain|openai|notion"`
-4. **다음 작업**: 전체 파이프라인 통합 테스트 (STT → LLM → Notion)
-5. 테스트 실행:
-   ```bash
-   PYTHONPATH=. python tests/test_stt.py
-   PYTHONPATH=. python tests/test_llm_summary.py
-   PYTHONPATH=. python tests/test_notion.py
-   ```
+## 🚀 새 세션 시작 방법
+
+### Backend 작업 이어서
+```bash
+# 환경 활성화
+conda activate fastapi
+
+# 의존성 확인
+pip list | grep -E "langchain|openai|notion"
+
+# 테스트 실행
+PYTHONPATH=. python tests/test_stt.py
+PYTHONPATH=. python tests/test_llm_summary.py
+PYTHONPATH=. python tests/test_notion.py
+```
+
+### Frontend 작업 이어서
+```bash
+cd frontend
+npm install
+npm run dev  # http://localhost:3000
+```
+
+### FastAPI Backend 시작 (다음 작업)
+```
+"HANDOFF.md 읽고 FastAPI Backend부터 만들어줘"
+```
+
+또는
+
+```
+"backend/app/main.py 부터 만들어서 Frontend와 연동하자"
+```
+
+## 📋 API 엔드포인트 명세 (Frontend 기대)
+
+### Recordings API
+```typescript
+// 녹음 생성
+POST /api/recordings
+Content-Type: multipart/form-data
+Body: { audio: File, title?: string }
+Response: { id: string, status: ProcessingStep, message: string }
+
+// 녹음 목록
+GET /api/recordings
+Response: Recording[]
+
+// 녹음 상세
+GET /api/recordings/{id}
+Response: Recording
+
+// 처리 상태 (폴링)
+GET /api/recordings/{id}/status
+Response: { status: string, progress: number }
+
+// 녹음 삭제
+DELETE /api/recordings/{id}
+Response: void
+```
+
+### Notion API
+```typescript
+// 연결 상태 확인
+GET /api/notion/status
+Response: { connected: boolean }
+
+// 설정 저장 (세션에 저장)
+POST /api/notion/config
+Body: { token: string, databaseId: string }
+Response: { success: boolean }
+
+// 연결 해제
+POST /api/notion/disconnect
+Response: { success: boolean }
+
+// 노션에 저장
+POST /api/notion/save
+Body: { recordingId: string, summary: string, title: string }
+Response: { url: string }
+```
 
 ## 주요 학습 내용 (Notion API)
 
