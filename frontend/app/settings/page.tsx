@@ -7,9 +7,10 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Check, AlertCircle, ExternalLink, Trash2 } from "lucide-react"
+import { Check, AlertCircle, ExternalLink, Trash2, Loader2 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { notionConfigSchema, safeValidate } from "@/lib/validations"
+import { notionApi } from "@/lib/api"
 
 export default function SettingsPage() {
   const [notionToken, setNotionToken] = useState("")
@@ -17,20 +18,16 @@ export default function SettingsPage() {
   const [isSaved, setIsSaved] = useState(false)
   const [isNotionConnected, setIsNotionConnected] = useState(false)
   const [saveMessage, setSaveMessage] = useState("")
+  const [isLoading, setIsLoading] = useState(false)
 
-  // Load saved settings
+  // Backend 세션에서 Notion 연결 상태 확인
   useEffect(() => {
-    const savedToken = localStorage.getItem("notion_token")
-    const savedDatabaseId = localStorage.getItem("notion_database_id")
-    
-    if (savedToken) setNotionToken(savedToken)
-    if (savedDatabaseId) setNotionDatabaseId(savedDatabaseId)
-    
-    setIsNotionConnected(!!savedToken && !!savedDatabaseId)
+    notionApi.checkConnection()
+      .then(({ connected }) => setIsNotionConnected(connected))
+      .catch(() => setIsNotionConnected(false))
   }, [])
 
-  const handleSave = useCallback(() => {
-    // Zod 검증
+  const handleSave = useCallback(async () => {
     const validation = safeValidate(notionConfigSchema, {
       token: notionToken,
       databaseId: notionDatabaseId,
@@ -43,41 +40,55 @@ export default function SettingsPage() {
       return
     }
 
-    // 검증된 데이터 사용
     const { token, databaseId } = validation.data
 
-    localStorage.setItem("notion_token", token)
-    localStorage.setItem("notion_database_id", databaseId)
+    setIsLoading(true)
+    try {
+      const { success } = await notionApi.saveConfig({ token, databaseId })
 
-    setIsSaved(true)
-    setIsNotionConnected(true)
-    setSaveMessage("설정이 저장되었습니다")
-    toast.success("설정이 저장되었습니다")
-
-    setTimeout(() => {
+      if (success) {
+        setIsSaved(true)
+        setIsNotionConnected(true)
+        setSaveMessage("설정이 저장되었습니다")
+        toast.success("설정이 저장되었습니다")
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "설정 저장에 실패했습니다"
+      setSaveMessage(message)
       setIsSaved(false)
-      setSaveMessage("")
-    }, 3000)
+      toast.error(message)
+    } finally {
+      setIsLoading(false)
+      setTimeout(() => {
+        setIsSaved(false)
+        setSaveMessage("")
+      }, 3000)
+    }
   }, [notionToken, notionDatabaseId])
 
-  const handleDisconnect = useCallback(() => {
-    localStorage.removeItem("notion_token")
-    localStorage.removeItem("notion_database_id")
-    setNotionToken("")
-    setNotionDatabaseId("")
-    setIsNotionConnected(false)
-    setSaveMessage("노션 연결이 해제되었습니다")
-    toast.info("노션 연결이 해제되었습니다")
-
-    setTimeout(() => {
-      setSaveMessage("")
-    }, 3000)
+  const handleDisconnect = useCallback(async () => {
+    setIsLoading(true)
+    try {
+      await notionApi.disconnect()
+      setNotionToken("")
+      setNotionDatabaseId("")
+      setIsNotionConnected(false)
+      setSaveMessage("노션 연결이 해제되었습니다")
+      toast.info("노션 연결이 해제되었습니다")
+    } catch {
+      toast.error("연결 해제에 실패했습니다")
+    } finally {
+      setIsLoading(false)
+      setTimeout(() => {
+        setSaveMessage("")
+      }, 3000)
+    }
   }, [])
 
   return (
     <div className="min-h-screen bg-background">
       <Header isNotionConnected={isNotionConnected} />
-      
+
       <main className="container mx-auto px-4 py-12">
         <div className="max-w-2xl mx-auto space-y-8">
           <div>
@@ -117,9 +128,9 @@ export default function SettingsPage() {
                 <h4 className="font-medium text-foreground text-sm">연동 방법</h4>
                 <ol className="text-sm text-muted-foreground space-y-2 list-decimal list-inside">
                   <li>
-                    <a 
-                      href="https://www.notion.so/my-integrations" 
-                      target="_blank" 
+                    <a
+                      href="https://www.notion.so/my-integrations"
+                      target="_blank"
                       rel="noopener noreferrer"
                       className="text-primary hover:underline inline-flex items-center gap-1"
                     >
@@ -143,9 +154,10 @@ export default function SettingsPage() {
                   <Input
                     id="notion-token"
                     type="password"
-                    placeholder="secret_xxxxxxxxxxxxxxxxxxxx"
+                    placeholder="ntn_xxxxxxxxxxxxxxxxxxxx"
                     value={notionToken}
                     onChange={(e) => setNotionToken(e.target.value)}
+                    disabled={isLoading}
                     className="bg-muted border-border text-foreground placeholder:text-muted-foreground"
                   />
                   <p className="text-xs text-muted-foreground">
@@ -163,6 +175,7 @@ export default function SettingsPage() {
                     placeholder="xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
                     value={notionDatabaseId}
                     onChange={(e) => setNotionDatabaseId(e.target.value)}
+                    disabled={isLoading}
                     className="bg-muted border-border text-foreground placeholder:text-muted-foreground"
                   />
                   <p className="text-xs text-muted-foreground">
@@ -175,8 +188,8 @@ export default function SettingsPage() {
               {saveMessage && (
                 <div className={cn(
                   "flex items-center gap-2 text-sm p-3 rounded-lg",
-                  isSaved 
-                    ? "bg-green-500/10 text-green-400" 
+                  isSaved
+                    ? "bg-green-500/10 text-green-400"
                     : "bg-destructive/10 text-destructive"
                 )}>
                   {isSaved ? (
@@ -192,14 +205,23 @@ export default function SettingsPage() {
               <div className="flex gap-3">
                 <Button
                   onClick={handleSave}
+                  disabled={isLoading}
                   className="flex-1 bg-primary text-primary-foreground hover:bg-primary/90"
                 >
-                  설정 저장
+                  {isLoading ? (
+                    <>
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      저장 중...
+                    </>
+                  ) : (
+                    "설정 저장"
+                  )}
                 </Button>
                 {isNotionConnected && (
                   <Button
                     variant="outline"
                     onClick={handleDisconnect}
+                    disabled={isLoading}
                     className="border-destructive text-destructive bg-transparent hover:bg-destructive/10"
                   >
                     <Trash2 className="h-4 w-4 mr-2" />

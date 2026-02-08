@@ -16,14 +16,18 @@ export type ProcessingStep = "idle" | "stt" | "ai" | "notion" | "complete"
 // Recording Types
 // ========================================
 
-/** 녹음 기록 */
+/** 녹음 기록 (Backend RecordingResponse 매칭) */
 export interface Recording {
   id: string
   title: string
-  date: string
-  duration: string
-  summary: string
-  notionUrl: string
+  duration: number
+  sttText: string | null
+  summary: string | null
+  notionUrl: string | null
+  status: string
+  progress: number
+  createdAt: string
+  updatedAt: string
 }
 
 /** 녹음 생성 요청 */
@@ -32,11 +36,17 @@ export interface CreateRecordingRequest {
   title?: string
 }
 
-/** 녹음 응답 */
-export interface RecordingResponse {
+/** 녹음 생성 응답 (Backend RecordingCreateResponse 매칭) */
+export interface RecordingCreateResponse {
   id: string
-  status: ProcessingStep
+  status: string
   message: string
+}
+
+/** 녹음 처리 상태 응답 (Backend RecordingStatusResponse 매칭) */
+export interface RecordingStatusResponse {
+  status: string
+  progress: number
 }
 
 // ========================================

@@ -3,6 +3,7 @@ Recordings API 라우터
 """
 
 import uuid
+import subprocess
 from pathlib import Path
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile
@@ -39,8 +40,43 @@ async def process_recording(recording_id: str, audio_path: str) -> None:
             if not recording:
                 return
 
-            # 1단계: STT
+            # 1단계: 오디오 파일 형식 확인 및 변환
             recording.status = "stt"
+            recording.progress = 10
+            await db.commit()
+
+            audio_path_obj = Path(audio_path)
+            
+            # 파일 확장자 확인
+            file_ext = audio_path_obj.suffix.lower()
+            
+            # 이미 Ogg 형식이면 변환 스킵
+            if file_ext in ['.ogg', '.opus']:
+                opus_path = audio_path_obj
+                print(f"✅ Ogg 파일 감지, 변환 스킵: {opus_path}")
+            else:
+                # WebM → Ogg Opus 변환 (코덱 복사)
+                opus_path = audio_path_obj.with_suffix(".opus.ogg")
+                
+                try:
+                    subprocess.run(
+                        [
+                            "ffmpeg",
+                            "-i", str(audio_path),  # 입력 (WebM/Opus)
+                            "-c:a", "copy",  # 오디오 코덱 복사 (재인코딩 안 함)
+                            "-y",  # 덮어쓰기
+                            str(opus_path),  # 출력 (Ogg/Opus)
+                        ],
+                        check=True,
+                        capture_output=True,
+                        stderr=subprocess.DEVNULL,  # ffmpeg 로그 숨김
+                    )
+                    print(f"✅ WebM → Ogg 변환 완료: {opus_path}")
+                except subprocess.CalledProcessError as e:
+                    print(f"❌ ffmpeg 변환 실패: {e.stderr.decode()}")
+                    raise e
+
+            # 2단계: STT
             recording.progress = 20
             await db.commit()
 
@@ -49,10 +85,10 @@ async def process_recording(recording_id: str, audio_path: str) -> None:
                 client_secret=settings.return_zero_client_secret,
             )
             results = await stt_client.transcribe_file(
-                audio_file_path=audio_path,
+                audio_file_path=str(opus_path),  # 변환된 Opus 파일 사용
                 chunk_size=8192,
-                sample_rate=16000,
-                encoding="LINEAR16",
+                sample_rate=48000,  # Opus는 보통 48kHz
+                encoding="OGG_OPUS",
             )
 
             # STT 결과 텍스트 추출
@@ -65,7 +101,12 @@ async def process_recording(recording_id: str, audio_path: str) -> None:
             recording.progress = 50
             await db.commit()
 
-            # 2단계: AI 요약
+            # 변환된 파일 정리 (원본 파일과 다른 경우만)
+            if opus_path != audio_path_obj and opus_path.exists():
+                opus_path.unlink()
+                print(f"🗑️ 변환 파일 삭제: {opus_path}")
+
+            # 3단계: AI 요약
             recording.status = "ai"
             recording.progress = 60
             await db.commit()
@@ -100,8 +141,19 @@ async def create_recording(
     audio_dir = Path(settings.output_dir) / "audio"
     audio_dir.mkdir(parents=True, exist_ok=True)
 
-    file_ext = Path(audio.filename or "audio.wav").suffix or ".wav"
+    # Content-Type 기반 확장자 결정
+    content_type = audio.content_type or ""
+    if "ogg" in content_type or "opus" in content_type:
+        file_ext = ".ogg"
+    elif "webm" in content_type:
+        file_ext = ".webm"
+    elif audio.filename:
+        file_ext = Path(audio.filename).suffix or ".webm"
+    else:
+        file_ext = ".webm"
+    
     audio_path = audio_dir / f"{recording_id}{file_ext}"
+    print(f"📥 파일 업로드: {audio.content_type} → {file_ext}")
 
     content = await audio.read()
     audio_path.write_bytes(content)

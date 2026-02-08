@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useCallback } from "react"
+import { useState, useEffect, useCallback, useRef } from "react"
 import { Mic, Sparkles, FileText } from "lucide-react"
 import { toast } from "sonner"
 import { Header } from "@/components/header"
@@ -9,39 +9,32 @@ import { FeatureCard } from "@/components/feature-card"
 import { AudioWaveform } from "@/components/audio-waveform"
 import { ProcessingStatus, type ProcessingStep } from "@/components/processing-status"
 import { SummaryPreview } from "@/components/summary-preview"
+import { recordingsApi, notionApi } from "@/lib/api"
+import type { Recording } from "@/types"
 
 type AppState = "idle" | "recording" | "processing" | "complete"
 
-const MOCK_SUMMARY = `## 오늘 강의 요약
-
-### 핵심 개념
-- 머신러닝의 기본 원리와 지도학습/비지도학습의 차이점
-- 신경망 구조와 역전파 알고리즘의 작동 방식
-- 과적합 문제와 이를 해결하기 위한 정규화 기법
-
-### 주요 내용
-1. **지도학습**: 레이블이 있는 데이터를 사용하여 모델을 훈련
-2. **비지도학습**: 레이블 없이 데이터의 패턴을 찾는 방식
-3. **강화학습**: 보상을 통해 최적의 행동을 학습
-
-### 다음 시간 예고
-- CNN(합성곱 신경망)의 구조와 이미지 분류 적용
-- 실습: MNIST 데이터셋을 활용한 손글씨 인식`
+const POLL_INTERVAL = 2000
 
 export default function Home() {
   const [appState, setAppState] = useState<AppState>("idle")
   const [processingStep, setProcessingStep] = useState<ProcessingStep>("idle")
   const [recordingTime, setRecordingTime] = useState(0)
   const [isNotionConnected, setIsNotionConnected] = useState(false)
+  const [completedRecording, setCompletedRecording] = useState<Recording | null>(null)
 
-  // Check Notion connection status
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null)
+  const audioChunksRef = useRef<Blob[]>([])
+  const streamRef = useRef<MediaStream | null>(null)
+
+  // Backend 세션에서 Notion 연결 상태 확인
   useEffect(() => {
-    const notionToken = localStorage.getItem("notion_token")
-    const notionDatabaseId = localStorage.getItem("notion_database_id")
-    setIsNotionConnected(!!notionToken && !!notionDatabaseId)
+    notionApi.checkConnection()
+      .then(({ connected }) => setIsNotionConnected(connected))
+      .catch(() => setIsNotionConnected(false))
   }, [])
 
-  // Recording timer
+  // 녹음 타이머
   useEffect(() => {
     let interval: NodeJS.Timeout
     if (appState === "recording") {
@@ -52,52 +45,155 @@ export default function Home() {
     return () => clearInterval(interval)
   }, [appState])
 
-  const simulateProcessing = useCallback(async () => {
-    setAppState("processing")
+  // 녹음 시작
+  const startRecording = useCallback(async () => {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+    streamRef.current = stream
+    audioChunksRef.current = []
+
+    // Return Zero 지원 형식으로 직접 녹음 시도
+    const preferredMimeTypes = [
+      'audio/ogg;codecs=opus',  // Ogg Opus (최우선)
+      'audio/webm;codecs=opus', // WebM Opus (대체)
+      'audio/webm',             // WebM (기본)
+    ]
+
+    let selectedMimeType = ''
+    for (const mimeType of preferredMimeTypes) {
+      if (MediaRecorder.isTypeSupported(mimeType)) {
+        selectedMimeType = mimeType
+        console.log(`✅ 지원되는 형식: ${mimeType}`)
+        break
+      }
+    }
+
+    const mediaRecorder = selectedMimeType
+      ? new MediaRecorder(stream, { mimeType: selectedMimeType })
+      : new MediaRecorder(stream)
     
-    // STT step
-    setProcessingStep("stt")
-    await new Promise((resolve) => setTimeout(resolve, 2000))
-    
-    // AI step
-    setProcessingStep("ai")
-    await new Promise((resolve) => setTimeout(resolve, 2000))
-    
-    // Notion step
-    setProcessingStep("notion")
-    await new Promise((resolve) => setTimeout(resolve, 1500))
-    
-    // Complete
-    setProcessingStep("complete")
-    setAppState("complete")
+    mediaRecorderRef.current = mediaRecorder
+
+    mediaRecorder.ondataavailable = (event) => {
+      if (event.data.size > 0) {
+        audioChunksRef.current.push(event.data)
+      }
+    }
+
+    mediaRecorder.start()
+    setAppState("recording")
+    setRecordingTime(0)
+    toast.success("녹음을 시작합니다")
   }, [])
+
+  // 녹음 중지 → Blob 반환
+  const stopRecording = useCallback((): Promise<Blob> => {
+    return new Promise((resolve) => {
+      const mediaRecorder = mediaRecorderRef.current
+      if (!mediaRecorder) {
+        resolve(new Blob())
+        return
+      }
+
+      mediaRecorder.onstop = () => {
+        // 녹음 시 사용한 MIME 타입 그대로 사용
+        const mimeType = mediaRecorder.mimeType || "audio/webm"
+        const audioBlob = new Blob(audioChunksRef.current, { type: mimeType })
+        console.log(`📦 Blob 생성 완료: ${mimeType}, ${audioBlob.size} bytes`)
+        
+        // 마이크 스트림 해제
+        streamRef.current?.getTracks().forEach((track) => track.stop())
+        streamRef.current = null
+        mediaRecorderRef.current = null
+        resolve(audioBlob)
+      }
+
+      mediaRecorder.stop()
+    })
+  }, [])
+
+  // 상태 폴링으로 백그라운드 처리 추적
+  const pollStatus = useCallback(async (recordingId: string): Promise<Recording> => {
+    return new Promise((resolve, reject) => {
+      const poll = async () => {
+        try {
+          const { status } = await recordingsApi.getStatus(recordingId)
+
+          // Backend 상태에 따라 processingStep 업데이트
+          if (status === "stt") {
+            setProcessingStep("stt")
+          } else if (status === "ai") {
+            setProcessingStep("ai")
+          } else if (status === "complete") {
+            setProcessingStep("complete")
+            const recording = await recordingsApi.get(recordingId)
+            resolve(recording)
+            return
+          } else if (status === "idle") {
+            // 에러로 롤백된 경우
+            reject(new Error("처리 중 오류가 발생했습니다"))
+            return
+          }
+
+          setTimeout(poll, POLL_INTERVAL)
+        } catch (error) {
+          reject(error)
+        }
+      }
+
+      poll()
+    })
+  }, [])
+
+  // 녹음 완료 후 처리
+  const processRecording = useCallback(async (audioBlob: Blob) => {
+    setAppState("processing")
+    setProcessingStep("stt")
+
+    try {
+      // 1. 오디오 업로드
+      const { id } = await recordingsApi.create({
+        audioBlob,
+        title: `강의 녹음 ${new Date().toLocaleDateString("ko-KR")}`,
+      })
+
+      // 2. 상태 폴링으로 처리 완료 대기
+      const recording = await pollStatus(id)
+
+      // 3. 완료
+      setCompletedRecording(recording)
+      setAppState("complete")
+      toast.success("강의 정리가 완료되었습니다")
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "처리 중 오류가 발생했습니다"
+      toast.error(message)
+      setAppState("idle")
+      setProcessingStep("idle")
+    }
+  }, [pollStatus])
 
   const handleRecordToggle = useCallback(async () => {
     try {
       if (appState === "idle") {
-        // 마이크 권한 요청
-        await navigator.mediaDevices.getUserMedia({ audio: true })
-        setAppState("recording")
-        setRecordingTime(0)
-        toast.success("녹음을 시작합니다")
+        await startRecording()
       } else if (appState === "recording") {
         toast.info("녹음을 처리하고 있습니다...")
-        await simulateProcessing()
+        const audioBlob = await stopRecording()
+        await processRecording(audioBlob)
       }
     } catch (error) {
-      console.error("녹음 에러:", error)
       if (error instanceof DOMException && error.name === "NotAllowedError") {
         toast.error("마이크 접근 권한이 필요합니다")
       } else {
         toast.error("녹음 중 오류가 발생했습니다")
       }
     }
-  }, [appState, simulateProcessing])
+  }, [appState, startRecording, stopRecording, processRecording])
 
   const handleReset = useCallback(() => {
     setAppState("idle")
     setProcessingStep("idle")
     setRecordingTime(0)
+    setCompletedRecording(null)
   }, [])
 
   const formatTime = useCallback((seconds: number) => {
@@ -133,7 +229,7 @@ export default function Home() {
   return (
     <div className="min-h-screen bg-background">
       <Header isNotionConnected={isNotionConnected} />
-      
+
       <main className="container mx-auto px-4 py-12">
         {/* Status Badge */}
         <div className="flex justify-center mb-8">
@@ -213,11 +309,11 @@ export default function Home() {
             </div>
           )}
 
-          {appState === "complete" && (
+          {appState === "complete" && completedRecording && (
             <div className="mb-16">
               <SummaryPreview
-                summary={MOCK_SUMMARY}
-                notionUrl="https://notion.so/example"
+                summary={completedRecording.summary || "요약을 생성하지 못했습니다"}
+                notionUrl={completedRecording.notionUrl || ""}
                 onReset={handleReset}
               />
             </div>

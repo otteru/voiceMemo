@@ -1,60 +1,69 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useCallback } from "react"
 import { Header } from "@/components/header"
 import { Card, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { ExternalLink, Calendar, Clock, FileText } from "lucide-react"
+import { ExternalLink, Calendar, Clock, FileText, Trash2, Loader2 } from "lucide-react"
+import { toast } from "sonner"
+import { recordingsApi, notionApi } from "@/lib/api"
+import type { Recording } from "@/types"
 
-interface Recording {
-  id: string
-  title: string
-  date: string
-  duration: string
-  summary: string
-  notionUrl: string
+function formatDuration(seconds: number): string {
+  const mins = Math.floor(seconds / 60)
+  const secs = seconds % 60
+  return `${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`
 }
 
-const MOCK_RECORDINGS: Recording[] = [
-  {
-    id: "1",
-    title: "머신러닝 기초 - 신경망 구조",
-    date: "2026-02-05",
-    duration: "45:32",
-    summary: "머신러닝의 기본 원리와 지도학습/비지도학습의 차이점, 신경망 구조와 역전파 알고리즘...",
-    notionUrl: "https://notion.so/example1",
-  },
-  {
-    id: "2",
-    title: "데이터 구조 - 트리와 그래프",
-    date: "2026-02-04",
-    duration: "52:18",
-    summary: "이진 트리의 탐색 방법, 그래프 탐색 알고리즘(BFS, DFS), 최단 경로 알고리즘...",
-    notionUrl: "https://notion.so/example2",
-  },
-  {
-    id: "3",
-    title: "운영체제 - 프로세스 관리",
-    date: "2026-02-03",
-    duration: "48:45",
-    summary: "프로세스와 스레드의 차이, CPU 스케줄링 알고리즘, 동기화와 교착상태...",
-    notionUrl: "https://notion.so/example3",
-  },
-]
+function formatDate(isoString: string): string {
+  return new Date(isoString).toLocaleDateString("ko-KR", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  })
+}
 
 export default function RecordingsPage() {
+  const [recordings, setRecordings] = useState<Recording[]>([])
   const [isNotionConnected, setIsNotionConnected] = useState(false)
+  const [isLoading, setIsLoading] = useState(true)
+  const [deletingId, setDeletingId] = useState<string | null>(null)
+
+  const loadRecordings = useCallback(async () => {
+    try {
+      const data = await recordingsApi.list()
+      setRecordings(data)
+    } catch {
+      toast.error("녹음 목록을 불러오지 못했습니다")
+    } finally {
+      setIsLoading(false)
+    }
+  }, [])
 
   useEffect(() => {
-    const notionToken = localStorage.getItem("notion_token")
-    const notionDatabaseId = localStorage.getItem("notion_database_id")
-    setIsNotionConnected(!!notionToken && !!notionDatabaseId)
+    loadRecordings()
+    notionApi.checkConnection()
+      .then(({ connected }) => setIsNotionConnected(connected))
+      .catch(() => setIsNotionConnected(false))
+  }, [loadRecordings])
+
+  const handleDelete = useCallback(async (id: string) => {
+    setDeletingId(id)
+    try {
+      await recordingsApi.delete(id)
+      setRecordings((prev) => prev.filter((r) => r.id !== id))
+      toast.success("녹음이 삭제되었습니다")
+    } catch {
+      toast.error("삭제에 실패했습니다")
+    } finally {
+      setDeletingId(null)
+    }
   }, [])
 
   return (
     <div className="min-h-screen bg-background">
       <Header isNotionConnected={isNotionConnected} />
-      
+
       <main className="container mx-auto px-4 py-12">
         <div className="max-w-4xl mx-auto space-y-8">
           <div>
@@ -64,56 +73,78 @@ export default function RecordingsPage() {
             </p>
           </div>
 
-          <div className="space-y-4">
-            {MOCK_RECORDINGS.map((recording) => (
-              <Card key={recording.id} className="border-border bg-card hover:bg-card/80 transition-colors">
-                <CardContent className="p-6">
-                  <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-                    <div className="space-y-2 flex-1">
-                      <h3 className="text-lg font-semibold text-foreground">
-                        {recording.title}
-                      </h3>
-                      <div className="flex flex-wrap items-center gap-4 text-sm text-muted-foreground">
-                        <span className="flex items-center gap-1">
-                          <Calendar className="h-4 w-4" />
-                          {recording.date}
-                        </span>
-                        <span className="flex items-center gap-1">
-                          <Clock className="h-4 w-4" />
-                          {recording.duration}
-                        </span>
+          {isLoading ? (
+            <div className="flex justify-center py-12">
+              <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {recordings.map((recording) => (
+                <Card key={recording.id} className="border-border bg-card hover:bg-card/80 transition-colors">
+                  <CardContent className="p-6">
+                    <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                      <div className="space-y-2 flex-1">
+                        <h3 className="text-lg font-semibold text-foreground">
+                          {recording.title}
+                        </h3>
+                        <div className="flex flex-wrap items-center gap-4 text-sm text-muted-foreground">
+                          <span className="flex items-center gap-1">
+                            <Calendar className="h-4 w-4" />
+                            {formatDate(recording.createdAt)}
+                          </span>
+                          <span className="flex items-center gap-1">
+                            <Clock className="h-4 w-4" />
+                            {formatDuration(recording.duration)}
+                          </span>
+                          {recording.status !== "complete" && (
+                            <span className="text-yellow-500">
+                              {recording.status === "stt" && "STT 처리 중..."}
+                              {recording.status === "ai" && "AI 요약 중..."}
+                              {recording.status === "idle" && "대기 중"}
+                            </span>
+                          )}
+                        </div>
+                        {recording.summary && (
+                          <p className="text-sm text-muted-foreground line-clamp-2">
+                            {recording.summary}
+                          </p>
+                        )}
                       </div>
-                      <p className="text-sm text-muted-foreground line-clamp-2">
-                        {recording.summary}
-                      </p>
+                      <div className="flex gap-2">
+                        {recording.notionUrl && (
+                          <Button
+                            asChild
+                            size="sm"
+                            className="bg-primary text-primary-foreground hover:bg-primary/90"
+                          >
+                            <a href={recording.notionUrl} target="_blank" rel="noopener noreferrer">
+                              <ExternalLink className="h-4 w-4 mr-2" />
+                              노션
+                            </a>
+                          </Button>
+                        )}
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handleDelete(recording.id)}
+                          disabled={deletingId === recording.id}
+                          className="border-destructive text-destructive bg-transparent hover:bg-destructive/10"
+                        >
+                          {deletingId === recording.id ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          ) : (
+                            <Trash2 className="h-4 w-4" />
+                          )}
+                        </Button>
+                      </div>
                     </div>
-                    <div className="flex gap-2">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="border-border bg-transparent text-foreground hover:bg-muted"
-                      >
-                        <FileText className="h-4 w-4 mr-2" />
-                        상세보기
-                      </Button>
-                      <Button
-                        asChild
-                        size="sm"
-                        className="bg-primary text-primary-foreground hover:bg-primary/90"
-                      >
-                        <a href={recording.notionUrl} target="_blank" rel="noopener noreferrer">
-                          <ExternalLink className="h-4 w-4 mr-2" />
-                          노션
-                        </a>
-                      </Button>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          )}
 
-          {MOCK_RECORDINGS.length === 0 && (
+          {!isLoading && recordings.length === 0 && (
             <div className="text-center py-12">
               <FileText className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
               <h3 className="text-lg font-medium text-foreground mb-2">
