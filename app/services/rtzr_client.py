@@ -40,12 +40,13 @@ class RTZRClient:
             response.raise_for_status()
 
             data = response.json()
-            self.access_token = data["access_token"]
+            token: str = data["access_token"]
+            self.access_token = token
             # expire_at은 타임스탬프 (밀리초)
             self.token_expire_at = datetime.fromtimestamp(data["expire_at"] / 1000)
 
             print(f"✅ 토큰 발급 완료 (만료: {self.token_expire_at})")
-            return self.access_token
+            return token
 
     async def stream_transcribe(
         self,

@@ -16,6 +16,12 @@ class Settings(BaseSettings):
     notion_api_key: str
     notion_page_url: Optional[str] = None  # 기본 페이지 URL (선택)
 
+    # FastAPI 세션 관리
+    session_secret_key: str = "your-secret-key-change-in-production"  # 프로덕션에서는 반드시 변경
+
+    # 데이터베이스
+    database_url: str = "sqlite+aiosqlite:///./voicememo.db"
+
     # 파일 저장 경로
     output_dir: str = "outputs"
 

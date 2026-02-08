@@ -8,9 +8,15 @@ from app.core.config import settings
 class NotionService:
     """Notion API 서비스"""
 
-    def __init__(self):
-        """Notion 클라이언트 초기화"""
-        self.client = Client(auth=settings.notion_api_key)
+    def __init__(self, token: Optional[str] = None):
+        """
+        Notion 클라이언트 초기화
+
+        Args:
+            token: Notion Integration Token (없으면 환경변수 사용)
+        """
+        auth = token or settings.notion_api_key
+        self.client = Client(auth=auth)
 
     def extract_page_id(self, url: str) -> str:
         """

@@ -277,17 +277,71 @@ voiceMemo/
 - **마크다운 제한**: 복잡한 마크다운은 지원 안 됨 (기본적인 형식만)
 - **블록 제한**: 한 번에 최대 100개 블록 생성 가능
 
+### 7. FastAPI Backend 주의사항 (2026-02-07 추가)
+
+#### config.py IDE 경고
+```python
+settings = Settings()  # Arguments missing... 경고 발생
+```
+- **원인**: IDE가 .env 파일 자동 로드를 모름
+- **실제**: 실행하면 정상 동작 (pydantic-settings가 .env 읽음)
+- **해결**: `# type: ignore` 추가 또는 무시
+
+#### database.py 타입 힌팅
+```python
+# ❌ 잘못된 타입
+async def get_db() -> AsyncSession:
+    yield session  # yield 사용 → 제너레이터!
+
+# ✅ 올바른 타입
+async def get_db() -> AsyncGenerator[AsyncSession, None]:
+    yield session
+```
+- `yield` 사용 시 반환 타입은 `AsyncGenerator`여야 함
+
+#### 스트리밍 STT 처리 방식
+- **현재**: 방식 1 (파일 업로드 후 스트리밍 STT)
+  - 브라우저 녹음 → Blob → HTTP POST → 서버 저장 → transcribe_file()
+  - python-multipart 필요 (FormData 파일 업로드)
+- **향후**: 방식 2 (실시간 WebSocket 스트리밍)
+  - 브라우저 녹음 → WebSocket → stream_transcribe()
+  - python-multipart 불필요
+- 상세 내용: `future.md` 참조
+
+#### python-multipart 필요성
+- **용도**: FastAPI에서 FormData 파일 업로드 처리
+- **사용처**: `POST /api/recordings` (오디오 파일 업로드)
+- **프론트엔드**: `FormData.append("audio", blob)` → HTTP POST
+- **백엔드**: `UploadFile = File(...)` → python-multipart 필요
+- **없으면**: `RuntimeError: Form data requires "python-multipart"`
+
 ## 관련 파일
 
 ### Backend 핵심 파일
+
+**FastAPI 앱:**
+- `app/main.py` - FastAPI 메인 앱 (CORS, 세션 미들웨어)
+- `app/core/config.py` - 환경변수 설정
+- `app/core/security.py` - httpOnly 쿠키 세션 관리
+- `app/core/database.py` - 비동기 DB 설정 및 세션
+
+**모델 & 스키마:**
+- `app/models/recording.py` - Recording 데이터 모델
+- `app/schemas/` - Pydantic 스키마 (예정)
+
+**서비스:**
 - `app/services/rtzr_client.py` - Return Zero STT 클라이언트
 - `app/services/llm_summarizer.py` - LLM 요약 서비스
 - `app/services/notion_client.py` - Notion API 클라이언트
-- `app/core/config.py` - 환경변수 설정
+
+**테스트:**
 - `tests/test_stt.py` - STT 테스트
 - `tests/test_llm_summary.py` - LLM 요약 테스트
 - `tests/test_notion.py` - Notion 연동 테스트
+
+**설정:**
 - `.env` - API 인증 정보
+- `requirements.txt` - Python 의존성
 
 ### Frontend 핵심 파일
 - `frontend/types/index.ts` - 전역 타입 정의
@@ -308,7 +362,7 @@ voiceMemo/
 ### 문서
 - `CLAUDE.md` - 프로젝트 개요 및 기술 스택
 - `HANDOFF.md` - 작업 인계 문서
-- `requirements.txt` - Python 의존성
+- `future.md` - 향후 개선 계획 (스트리밍 STT 방식 비교)
 
 ## 참고 자료
 - [RTZR 스트리밍 STT WebSocket 문서](https://developers.rtzr.ai/docs/stt-streaming/websocket/)
@@ -318,21 +372,102 @@ voiceMemo/
 - [Notion API 문서](https://developers.notion.com/reference/intro)
 - [notion-sdk-py GitHub](https://github.com/ramnes/notion-sdk-py)
 
+### 10. FastAPI Backend 인프라 구축 ✅ (2026-02-07)
+
+#### 10.1 FastAPI 기본 설정
+- **파일**: `app/main.py`
+- FastAPI 앱 생성 및 기본 설정
+- CORS 미들웨어 (http://localhost:3000 허용)
+- 세션 미들웨어 (httpOnly 쿠키)
+- Health Check 엔드포인트 (`/`, `/health`)
+
+#### 10.2 세션 관리
+- **파일**: `app/core/security.py`
+- httpOnly 쿠키 기반 세션 관리
+- `SessionManager` 클래스:
+  - `set_notion_config()`: Notion 토큰/DB ID 저장
+  - `get_notion_config()`: 세션에서 조회
+  - `is_notion_connected()`: 연결 상태 확인
+  - `clear_notion_config()`: 세션 삭제
+
+#### 10.3 데이터베이스 설정
+- **파일**: `app/core/database.py`
+- SQLAlchemy 비동기 ORM 설정
+- SQLite (`sqlite+aiosqlite:///./voicememo.db`)
+- `get_db()`: FastAPI 의존성 주입용 DB 세션
+- `init_db()`: 테이블 자동 생성
+- **중요**: `get_db()` 반환 타입은 `AsyncGenerator[AsyncSession, None]` (yield 사용)
+
+#### 10.4 Recording 모델
+- **파일**: `app/models/recording.py`
+- 녹음 기록 데이터 모델:
+  - `id`: 고유 식별자 (UUID)
+  - `title`: 녹음 제목
+  - `duration`: 녹음 길이 (초)
+  - `audio_file_path`: 오디오 파일 경로 (Optional - 스트리밍 시 null)
+  - `stt_text`: STT 변환 결과
+  - `summary`: AI 요약 결과
+  - `notion_url`: Notion 페이지 URL
+  - `status`: 처리 상태 (idle → stt → ai → notion → complete)
+  - `progress`: 진행률 (0-100)
+
+#### 10.5 의존성 업데이트
+- **파일**: `requirements.txt`
+- 추가된 패키지:
+  - `sqlalchemy>=2.0.0` (ORM)
+  - `aiosqlite>=0.19.0` (비동기 SQLite)
+  - `python-multipart>=0.0.6` (FormData 파일 업로드)
+  - `itsdangerous>=2.1.2` (세션 암호화)
+
+#### 10.6 환경변수 추가
+- **파일**: `.env`
+- `SESSION_SECRET_KEY`: FastAPI 세션 관리용
+
+## 현재 상태 (2026-02-07 업데이트)
+
+### ✅ Phase 1 완료: FastAPI Backend 인프라
+- FastAPI 기본 설정 (main.py, CORS)
+- httpOnly 쿠키 세션 관리 (security.py)
+- 데이터베이스 설정 및 모델 (database.py, Recording)
+- requirements.txt 업데이트
+
+### 🔄 Phase 2 진행 중: Notion API 구현
+- [ ] Notion API 스키마 작성 (app/schemas/notion.py)
+- [ ] Notion API 라우터 구현 (app/api/routes/notion.py)
+- [ ] main.py에 라우터 등록
+
+### 📅 다음 단계
+1. **Notion API 스키마 작성**
+   - `app/schemas/notion.py` 생성
+   - NotionConfigRequest, NotionStatusResponse 등 Pydantic 스키마
+
+2. **Notion API 라우터 구현**
+   - `app/api/routes/notion.py` 생성
+   - POST /api/notion/config (설정 저장)
+   - GET /api/notion/status (연결 상태)
+   - POST /api/notion/disconnect (연결 해제)
+   - POST /api/notion/save (페이지 생성)
+
+3. **Recordings API 구현** (Phase 3)
+   - 녹음 업로드 및 처리 파이프라인
+   - STT → AI → Notion 자동 처리
+   - 상태 폴링 API
+
 ## 마지막 상태
-- **날짜**: 2026-02-05
+- **날짜**: 2026-02-07
 - **Python 환경**: conda (fastapi), Python 3.13
 - **Node 환경**: Node.js (Next.js 16, React 19)
 - **브랜치**: main
 - **마지막 작업**:
-  - Backend: Notion API 연동 완료 ✅
-  - Frontend: 구조 개선 완료 ✅
+  - Backend: FastAPI 인프라 구축 완료 ✅
+  - Phase 1 완료, Phase 2 시작
 - **테스트 상태**:
   - STT 변환 성공 ✅
   - LLM 요약 성공 ✅
   - Notion 페이지 생성 성공 ✅
-  - Frontend 빌드: 미테스트 (Backend 없음)
-- **컨텍스트 사용량**: ~77k 토큰
-- **다음 단계**: FastAPI Backend 구축 (Frontend와 연동)
+  - FastAPI 서버: 미실행 (라우터 구현 전)
+- **컨텍스트 사용량**: ~88k 토큰
+- **다음 단계**: Notion API 스키마 및 라우터 구현
 
 ## 🚀 새 세션 시작 방법
 
