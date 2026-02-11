@@ -36,7 +36,16 @@ async def save_notion_config(
     except Exception:
         raise HTTPException(status_code=400, detail="유효하지 않은 Notion 토큰입니다")
 
-    session_manager.set_notion_config(request, body.token, body.database_id)
+    # URL에서 page_id 추출
+    try:
+        page_id = service.extract_page_id(body.page_url)
+    except ValueError:
+        raise HTTPException(
+            status_code=400,
+            detail="유효하지 않은 Notion URL입니다. 페이지 URL을 확인해주세요",
+        )
+
+    session_manager.set_notion_config(request, body.token, page_id)
     return NotionConfigResponse(success=True)
 
 
@@ -53,18 +62,17 @@ async def save_to_notion(
 ) -> NotionSaveResponse:
     """요약 내용을 Notion 페이지로 저장"""
     token = session_manager.get_notion_token(request)
-    database_id = session_manager.get_notion_database_id(request)
+    page_id = session_manager.get_notion_page_id(request)
 
-    if not token or not database_id:
+    if not token or not page_id:
         raise HTTPException(status_code=401, detail="Notion이 연결되지 않았습니다")
 
     try:
         service = NotionService(token=token)
-        # database_id를 부모 페이지 URL로 사용
         result = service.create_lecture_page(
             title=body.title,
             summary=body.summary,
-            parent_page_url=f"https://www.notion.so/{database_id}",
+            parent_page_id=page_id,
         )
         page_url = result.get("url", "")
         return NotionSaveResponse(url=page_url)

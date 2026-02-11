@@ -14,7 +14,7 @@ import { notionApi } from "@/lib/api"
 
 export default function SettingsPage() {
   const [notionToken, setNotionToken] = useState("")
-  const [notionDatabaseId, setNotionDatabaseId] = useState("")
+  const [notionPageUrl, setNotionPageUrl] = useState("")
   const [isSaved, setIsSaved] = useState(false)
   const [isNotionConnected, setIsNotionConnected] = useState(false)
   const [saveMessage, setSaveMessage] = useState("")
@@ -30,7 +30,7 @@ export default function SettingsPage() {
   const handleSave = useCallback(async () => {
     const validation = safeValidate(notionConfigSchema, {
       token: notionToken,
-      databaseId: notionDatabaseId,
+      pageUrl: notionPageUrl,
     })
 
     if (!validation.success) {
@@ -40,11 +40,11 @@ export default function SettingsPage() {
       return
     }
 
-    const { token, databaseId } = validation.data
+    const { token, pageUrl } = validation.data
 
     setIsLoading(true)
     try {
-      const { success } = await notionApi.saveConfig({ token, databaseId })
+      const { success } = await notionApi.saveConfig({ token, pageUrl })
 
       if (success) {
         setIsSaved(true)
@@ -64,14 +64,14 @@ export default function SettingsPage() {
         setSaveMessage("")
       }, 3000)
     }
-  }, [notionToken, notionDatabaseId])
+  }, [notionToken, notionPageUrl])
 
   const handleDisconnect = useCallback(async () => {
     setIsLoading(true)
     try {
       await notionApi.disconnect()
       setNotionToken("")
-      setNotionDatabaseId("")
+      setNotionPageUrl("")
       setIsNotionConnected(false)
       setSaveMessage("노션 연결이 해제되었습니다")
       toast.info("노션 연결이 해제되었습니다")
@@ -140,8 +140,8 @@ export default function SettingsPage() {
                     에서 새 Integration을 생성하세요
                   </li>
                   <li>생성된 Integration의 Internal Integration Secret을 복사하세요</li>
-                  <li>노션에서 강의록을 저장할 데이터베이스를 만들고 Integration을 연결하세요</li>
-                  <li>데이터베이스 URL에서 Database ID를 복사하세요</li>
+                  <li>강의록을 저장할 노션 페이지에서 Integration을 연결하세요</li>
+                  <li>해당 페이지의 URL을 복사하세요</li>
                 </ol>
               </div>
 
@@ -166,20 +166,20 @@ export default function SettingsPage() {
                 </div>
 
                 <div className="space-y-2">
-                  <Label htmlFor="notion-database" className="text-foreground">
-                    Notion Database ID
+                  <Label htmlFor="notion-page-url" className="text-foreground">
+                    Notion 페이지 URL
                   </Label>
                   <Input
-                    id="notion-database"
+                    id="notion-page-url"
                     type="text"
-                    placeholder="xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
-                    value={notionDatabaseId}
-                    onChange={(e) => setNotionDatabaseId(e.target.value)}
+                    placeholder="https://www.notion.so/페이지이름-abc123..."
+                    value={notionPageUrl}
+                    onChange={(e) => setNotionPageUrl(e.target.value)}
                     disabled={isLoading}
                     className="bg-muted border-border text-foreground placeholder:text-muted-foreground"
                   />
                   <p className="text-xs text-muted-foreground">
-                    데이터베이스 URL에서 복사: notion.so/[Database ID]?v=...
+                    강의록을 저장할 페이지에서 &quot;링크 복사&quot;로 URL을 붙여넣으세요
                   </p>
                 </div>
               </div>

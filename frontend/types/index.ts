@@ -56,7 +56,7 @@ export interface RecordingStatusResponse {
 /** Notion 설정 */
 export interface NotionConfig {
   token: string
-  databaseId: string
+  pageUrl: string
 }
 
 /** Notion 연결 상태 */

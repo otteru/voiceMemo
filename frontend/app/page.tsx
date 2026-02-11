@@ -159,7 +159,23 @@ export default function Home() {
       // 2. 상태 폴링으로 처리 완료 대기
       const recording = await pollStatus(id)
 
-      // 3. 완료
+      // 3. Notion 연결 시 자동 저장
+      if (isNotionConnected && recording.summary) {
+        setProcessingStep("notion")
+        try {
+          const { url } = await notionApi.save({
+            recordingId: recording.id,
+            summary: recording.summary,
+            title: recording.title,
+          })
+          recording.notionUrl = url
+          toast.success("노션에 저장되었습니다")
+        } catch {
+          toast.error("노션 저장에 실패했습니다. 수동으로 저장해주세요")
+        }
+      }
+
+      // 4. 완료
       setCompletedRecording(recording)
       setAppState("complete")
       toast.success("강의 정리가 완료되었습니다")
@@ -169,7 +185,7 @@ export default function Home() {
       setAppState("idle")
       setProcessingStep("idle")
     }
-  }, [pollStatus])
+  }, [pollStatus, isNotionConnected])
 
   const handleRecordToggle = useCallback(async () => {
     try {

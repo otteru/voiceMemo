@@ -11,20 +11,20 @@ class SessionManager:
 
     # 세션 키 상수
     NOTION_TOKEN_KEY = "notion_token"
-    NOTION_DATABASE_ID_KEY = "notion_database_id"
+    NOTION_PAGE_ID_KEY = "notion_page_id"
 
     @staticmethod
-    def set_notion_config(request: Request, token: str, database_id: str) -> None:
+    def set_notion_config(request: Request, token: str, page_id: str) -> None:
         """
         Notion 설정을 세션에 저장
 
         Args:
             request: FastAPI Request 객체
             token: Notion Integration Token
-            database_id: Notion Database ID
+            page_id: Notion 페이지 ID (URL에서 추출된 32자 hex)
         """
         request.session[SessionManager.NOTION_TOKEN_KEY] = token
-        request.session[SessionManager.NOTION_DATABASE_ID_KEY] = database_id
+        request.session[SessionManager.NOTION_PAGE_ID_KEY] = page_id
 
     @staticmethod
     def get_notion_token(request: Request) -> Optional[str]:
@@ -40,17 +40,17 @@ class SessionManager:
         return request.session.get(SessionManager.NOTION_TOKEN_KEY)
 
     @staticmethod
-    def get_notion_database_id(request: Request) -> Optional[str]:
+    def get_notion_page_id(request: Request) -> Optional[str]:
         """
-        세션에서 Notion Database ID 조회
+        세션에서 Notion 페이지 ID 조회
 
         Args:
             request: FastAPI Request 객체
 
         Returns:
-            Notion Database ID 또는 None
+            Notion 페이지 ID 또는 None
         """
-        return request.session.get(SessionManager.NOTION_DATABASE_ID_KEY)
+        return request.session.get(SessionManager.NOTION_PAGE_ID_KEY)
 
     @staticmethod
     def get_notion_config(request: Request) -> tuple[Optional[str], Optional[str]]:
@@ -61,11 +61,11 @@ class SessionManager:
             request: FastAPI Request 객체
 
         Returns:
-            (token, database_id) 튜플
+            (token, page_id) 튜플
         """
         token = SessionManager.get_notion_token(request)
-        database_id = SessionManager.get_notion_database_id(request)
-        return token, database_id
+        page_id = SessionManager.get_notion_page_id(request)
+        return token, page_id
 
     @staticmethod
     def is_notion_connected(request: Request) -> bool:
@@ -79,8 +79,8 @@ class SessionManager:
             연결 여부
         """
         token = SessionManager.get_notion_token(request)
-        database_id = SessionManager.get_notion_database_id(request)
-        return token is not None and database_id is not None
+        page_id = SessionManager.get_notion_page_id(request)
+        return token is not None and page_id is not None
 
     @staticmethod
     def clear_notion_config(request: Request) -> None:
@@ -91,7 +91,7 @@ class SessionManager:
             request: FastAPI Request 객체
         """
         request.session.pop(SessionManager.NOTION_TOKEN_KEY, None)
-        request.session.pop(SessionManager.NOTION_DATABASE_ID_KEY, None)
+        request.session.pop(SessionManager.NOTION_PAGE_ID_KEY, None)
 
     @staticmethod
     def clear_all(request: Request) -> None:

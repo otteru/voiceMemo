@@ -46,7 +46,7 @@ class NotionService:
 
     def create_page(
         self,
-        parent_page_url: str,
+        parent_page_id: str,
         title: str,
         blocks: List[Dict[str, Any]]
     ) -> Dict[str, Any]:
@@ -54,17 +54,15 @@ class NotionService:
         Notion 페이지 생성
 
         Args:
-            parent_page_url: 부모 페이지 URL
+            parent_page_id: 부모 페이지 ID (32자 hex)
             title: 페이지 제목
             blocks: 페이지 내용 블록 리스트
 
         Returns:
             생성된 페이지 정보
         """
-        page_id = self.extract_page_id(parent_page_url)
-
         response = self.client.pages.create(
-            parent={"page_id": page_id},
+            parent={"page_id": parent_page_id},
             properties={
                 "title": {
                     "title": [
@@ -84,7 +82,7 @@ class NotionService:
         self,
         title: str,
         summary: str,
-        parent_page_url: Optional[str] = None
+        parent_page_id: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         강의 노트 페이지 생성
@@ -92,23 +90,21 @@ class NotionService:
         Args:
             title: 강의 제목
             summary: LLM이 생성한 강의 요약
-            parent_page_url: 부모 페이지 URL (없으면 환경변수 사용)
+            parent_page_id: 부모 페이지 ID (없으면 환경변수 URL에서 추출)
 
         Returns:
             생성된 페이지 정보
         """
-        # 부모 페이지 URL 결정
-        if parent_page_url is None:
+        if parent_page_id is None:
             if settings.notion_page_url is None:
-                raise ValueError("parent_page_url을 제공하거나 NOTION_PAGE_URL 환경변수를 설정하세요")
-            parent_page_url = settings.notion_page_url
+                raise ValueError("parent_page_id를 제공하거나 NOTION_PAGE_URL 환경변수를 설정하세요")
+            parent_page_id = self.extract_page_id(settings.notion_page_url)
 
         # 요약 내용을 Notion 블록으로 변환
         blocks = self._convert_summary_to_blocks(summary)
 
-        # 페이지 생성
         return self.create_page(
-            parent_page_url=parent_page_url,
+            parent_page_id=parent_page_id,
             title=title,
             blocks=blocks
         )

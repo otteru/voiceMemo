@@ -9,8 +9,8 @@ class NotionConfigRequest(BaseModel):
     """Notion 설정 저장 요청"""
 
     token: str = Field(..., min_length=1, description="Notion Integration Token")
-    database_id: str = Field(
-        ..., min_length=1, alias="databaseId", description="Notion Database ID"
+    page_url: str = Field(
+        ..., min_length=1, alias="pageUrl", description="Notion 페이지 URL"
     )
 
     model_config = {"populate_by_name": True}
