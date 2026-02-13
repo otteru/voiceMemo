@@ -9,7 +9,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 
-from app.api.routes import notion, recordings
+from app.api.routes import notion, recordings, streaming
 from app.core.config import settings
 from app.core.database import init_db, close_db
 
@@ -71,6 +71,7 @@ async def health_check():
 # 라우터 등록
 app.include_router(recordings.router, prefix="/api/recordings", tags=["recordings"])
 app.include_router(notion.router, prefix="/api/notion", tags=["notion"])
+app.include_router(streaming.router, tags=["streaming"])
 
 
 if __name__ == "__main__":
