@@ -135,6 +135,30 @@ export interface FeatureCardProps {
 }
 
 // ========================================
+// Report Types (실시간 모드 보고서)
+// ========================================
+
+/** 점진적 보고서 요청 */
+export interface ProgressiveReportRequest {
+  transcriptChunk: string
+  previousReport: string | null
+  chunkIndex: number
+}
+
+/** 점진적 보고서 응답 */
+export interface ProgressiveReportResponse {
+  report: string
+  chunkIndex: number
+}
+
+/** 보고서 청크 (이력 추적용) */
+export interface ReportChunk {
+  index: number
+  report: string
+  timestamp: number
+}
+
+// ========================================
 // Settings Types
 // ========================================
 

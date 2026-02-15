@@ -8,9 +8,10 @@ interface LiveTranscriptProps {
   segments: TranscriptSegment[]
   interimText: string
   isStreaming: boolean
+  className?: string
 }
 
-export function LiveTranscript({ segments, interimText, isStreaming }: LiveTranscriptProps) {
+export function LiveTranscript({ segments, interimText, isStreaming, className }: LiveTranscriptProps) {
   const bottomRef = useRef<HTMLDivElement>(null)
 
   // 새 텍스트가 추가될 때 자동 스크롤
@@ -21,7 +22,7 @@ export function LiveTranscript({ segments, interimText, isStreaming }: LiveTrans
   const hasContent = segments.length > 0 || interimText
 
   return (
-    <div className="w-full max-w-2xl mx-auto">
+    <div className={className ?? "w-full max-w-2xl mx-auto"}>
       <div className="rounded-lg border border-border bg-card">
         {/* 헤더 */}
         <div className="flex items-center gap-2 px-4 py-3 border-b border-border">

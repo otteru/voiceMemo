@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect, useCallback, useRef } from "react"
-import { Mic, Sparkles, FileText } from "lucide-react"
+import { Mic, Sparkles, FileText, Copy, ExternalLink, RotateCcw } from "lucide-react"
 import { toast } from "sonner"
 import { Header } from "@/components/header"
 import { RecordButton } from "@/components/record-button"
@@ -10,14 +10,18 @@ import { AudioWaveform } from "@/components/audio-waveform"
 import { ProcessingStatus, type ProcessingStep } from "@/components/processing-status"
 import { SummaryPreview } from "@/components/summary-preview"
 import { ModeSelector, type RecordingMode } from "@/components/mode-selector"
-import { LiveTranscript } from "@/components/live-transcript"
+import { DualPanel } from "@/components/dual-panel"
 import { useStreamingSTT } from "@/hooks/use-streaming-stt"
+import { useProgressiveReport } from "@/hooks/use-progressive-report"
 import { recordingsApi, notionApi } from "@/lib/api"
+import { Button } from "@/components/ui/button"
+import { ScrollArea } from "@/components/ui/scroll-area"
 import type { Recording } from "@/types"
 
 type AppState = "idle" | "recording" | "processing" | "complete"
 
 const POLL_INTERVAL = 2000
+const REPORT_INTERVAL_SECONDS = 180
 
 export default function Home() {
   const [appState, setAppState] = useState<AppState>("idle")
@@ -26,20 +30,34 @@ export default function Home() {
   const [isNotionConnected, setIsNotionConnected] = useState(false)
   const [completedRecording, setCompletedRecording] = useState<Recording | null>(null)
   const [recordingMode, setRecordingMode] = useState<RecordingMode>("realtime")
+  const [notionUrl, setNotionUrl] = useState<string | null>(null)
+  const [isSavingNotion, setIsSavingNotion] = useState(false)
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const audioChunksRef = useRef<Blob[]>([])
   const streamRef = useRef<MediaStream | null>(null)
+  const lastReportTimeRef = useRef(0)
+  const pendingFinalRef = useRef(false)
 
   const {
     state: streamingState,
     segments,
     interimText,
+    finalText,
     startStreaming,
     stopStreaming,
     resetStreaming,
     error: streamingError,
   } = useStreamingSTT()
+
+  const {
+    currentReport,
+    reportChunks,
+    isGenerating,
+    error: reportError,
+    triggerReport,
+    resetReport,
+  } = useProgressiveReport()
 
   // 스트리밍 에러 토스트
   useEffect(() => {
@@ -48,6 +66,13 @@ export default function Home() {
     }
   }, [streamingError])
 
+  // 보고서 에러 토스트
+  useEffect(() => {
+    if (reportError) {
+      toast.error(`보고서 생성 실패: ${reportError}`)
+    }
+  }, [reportError])
+
   // 스트리밍 상태 → appState 동기화
   useEffect(() => {
     if (recordingMode !== "realtime") return
@@ -55,12 +80,40 @@ export default function Home() {
     if (streamingState === "streaming") {
       setAppState("recording")
     } else if (streamingState === "idle" && appState === "recording") {
-      // stopStreaming 후 eos_ack를 받아 idle로 돌아온 경우
-      setAppState("idle")
+      // pendingFinalRef가 true면 완료 처리 effect에서 담당
+      if (!pendingFinalRef.current) {
+        setAppState("idle")
+      }
     } else if (streamingState === "error") {
       setAppState("idle")
     }
   }, [streamingState, recordingMode, appState])
+
+  // eos_ack 수신 후 최종 보고서 표시 (실시간 모드)
+  useEffect(() => {
+    if (!pendingFinalRef.current) return
+    if (streamingState !== "idle") return
+
+    pendingFinalRef.current = false
+
+    if (currentReport.trim()) {
+      setAppState("complete")
+      toast.success("강의 정리가 완료되었습니다")
+    } else if (finalText.trim()) {
+      // 보고서가 아직 없으면 (3분 미만 녹음) 마지막 트리거 시도
+      triggerReport(segments).then((success) => {
+        if (success) {
+          setAppState("complete")
+          toast.success("강의 정리가 완료되었습니다")
+        } else {
+          setAppState("idle")
+          toast.info("녹음이 너무 짧아 보고서를 생성하지 못했습니다")
+        }
+      })
+    } else {
+      setAppState("idle")
+    }
+  }, [streamingState, currentReport, finalText, segments, triggerReport])
 
   // Backend 세션에서 Notion 연결 상태 확인
   useEffect(() => {
@@ -79,6 +132,18 @@ export default function Home() {
     }
     return () => clearInterval(interval)
   }, [appState])
+
+  // 점진적 보고서 트리거 (3분마다)
+  useEffect(() => {
+    if (appState !== "recording" || recordingMode !== "realtime") return
+    if (isGenerating) return
+
+    const timeSinceLastReport = recordingTime - lastReportTimeRef.current
+    if (timeSinceLastReport >= REPORT_INTERVAL_SECONDS && segments.length > 0) {
+      triggerReport(segments)
+      lastReportTimeRef.current = recordingTime
+    }
+  }, [recordingTime, appState, recordingMode, segments, isGenerating, triggerReport])
 
   // 녹음 시작 (업로드 모드)
   const startRecording = useCallback(async () => {
@@ -221,6 +286,7 @@ export default function Home() {
         }
       } else if (appState === "recording") {
         if (recordingMode === "realtime") {
+          pendingFinalRef.current = true
           stopStreaming()
           toast.info("스트리밍을 종료합니다...")
         } else {
@@ -238,13 +304,50 @@ export default function Home() {
     }
   }, [appState, recordingMode, startStreaming, stopStreaming, startRecording, stopRecording, processRecording])
 
+  // Notion에 보고서 저장 (실시간 모드 완료 후)
+  const handleSaveToNotion = useCallback(async () => {
+    if (!currentReport.trim()) return
+
+    setIsSavingNotion(true)
+    try {
+      const { url } = await notionApi.save({
+        recordingId: "realtime",
+        summary: currentReport,
+        title: `강의 녹음 ${new Date().toLocaleDateString("ko-KR")}`,
+      })
+      setNotionUrl(url)
+      toast.success("노션에 저장되었습니다")
+    } catch {
+      toast.error("노션 저장에 실패했습니다")
+    } finally {
+      setIsSavingNotion(false)
+    }
+  }, [currentReport])
+
+  // 보고서 복사
+  const handleCopyReport = useCallback(async () => {
+    if (!currentReport.trim()) return
+
+    try {
+      await navigator.clipboard.writeText(currentReport)
+      toast.success("보고서가 복사되었습니다")
+    } catch {
+      toast.error("복사에 실패했습니다")
+    }
+  }, [currentReport])
+
   const handleReset = useCallback(() => {
     setAppState("idle")
     setProcessingStep("idle")
     setRecordingTime(0)
     setCompletedRecording(null)
+    setNotionUrl(null)
+    setIsSavingNotion(false)
     resetStreaming()
-  }, [resetStreaming])
+    resetReport()
+    lastReportTimeRef.current = 0
+    pendingFinalRef.current = false
+  }, [resetStreaming, resetReport])
 
   const formatTime = useCallback((seconds: number) => {
     const mins = Math.floor(seconds / 60)
@@ -253,6 +356,9 @@ export default function Home() {
   }, [])
 
   const isRecordingOrProcessing = appState === "recording" || appState === "processing"
+
+  // 실시간 모드 완료 여부 (보고서 기반)
+  const isRealtimeComplete = appState === "complete" && recordingMode === "realtime" && currentReport.trim()
 
   const features = [
     {
@@ -266,8 +372,8 @@ export default function Home() {
       icon: Sparkles,
       iconColor: "text-green-400",
       iconBgColor: "bg-green-500/20",
-      title: "AI 자동 요약",
-      description: "핵심 내용만 추출하여 체계적으로 정리",
+      title: "AI 자동 정리",
+      description: "핵심 내용을 추출하여 보고서 형식으로 정리",
     },
     {
       icon: FileText,
@@ -350,18 +456,21 @@ export default function Home() {
                 강의 정리가 완료되었습니다
               </h1>
               <p className="text-muted-foreground mb-8">
-                아래에서 요약 내용을 확인하세요
+                아래에서 보고서를 확인하세요
               </p>
             </>
           )}
 
-          {/* 실시간 전사 결과 (realtime + recording) */}
+          {/* 듀얼 패널: 실시간 모드 녹음 중 */}
           {appState === "recording" && recordingMode === "realtime" && (
             <div className="w-full mb-8">
-              <LiveTranscript
+              <DualPanel
                 segments={segments}
                 interimText={interimText}
                 isStreaming={streamingState === "streaming"}
+                currentReport={currentReport}
+                reportChunkCount={reportChunks.length}
+                isGenerating={isGenerating}
               />
             </div>
           )}
@@ -382,7 +491,65 @@ export default function Home() {
             </div>
           )}
 
-          {appState === "complete" && completedRecording && (
+          {/* 실시간 모드 완료: 보고서 + Notion 저장/복사 버튼 */}
+          {isRealtimeComplete && (
+            <div className="w-full max-w-2xl space-y-6 rounded-xl border border-border bg-card p-6 mb-16">
+              <div className="space-y-2">
+                <h3 className="text-xl font-semibold text-foreground">강의 보고서</h3>
+                <p className="text-sm text-muted-foreground">
+                  AI가 정리한 강의 내용입니다
+                </p>
+              </div>
+
+              <ScrollArea className="max-h-96">
+                <div className="rounded-lg bg-muted/50 p-4">
+                  <div className="whitespace-pre-wrap text-sm text-foreground leading-relaxed">
+                    {currentReport}
+                  </div>
+                </div>
+              </ScrollArea>
+
+              <div className="flex flex-col gap-3 sm:flex-row">
+                {isNotionConnected && !notionUrl && (
+                  <Button
+                    onClick={handleSaveToNotion}
+                    disabled={isSavingNotion}
+                    className="flex-1 bg-primary text-primary-foreground hover:bg-primary/90"
+                  >
+                    <ExternalLink className="mr-2 h-4 w-4" />
+                    {isSavingNotion ? "저장 중..." : "Notion에 저장"}
+                  </Button>
+                )}
+                {notionUrl && (
+                  <Button asChild className="flex-1 bg-primary text-primary-foreground hover:bg-primary/90">
+                    <a href={notionUrl} target="_blank" rel="noopener noreferrer">
+                      <ExternalLink className="mr-2 h-4 w-4" />
+                      노션에서 보기
+                    </a>
+                  </Button>
+                )}
+                <Button
+                  variant="outline"
+                  onClick={handleCopyReport}
+                  className="flex-1 border-border bg-transparent text-foreground hover:bg-muted"
+                >
+                  <Copy className="mr-2 h-4 w-4" />
+                  복사하기
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={handleReset}
+                  className="flex-1 border-border bg-transparent text-foreground hover:bg-muted"
+                >
+                  <RotateCcw className="mr-2 h-4 w-4" />
+                  다시 녹음하기
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {/* 업로드 모드 완료: 기존 SummaryPreview */}
+          {appState === "complete" && recordingMode === "upload" && completedRecording && (
             <div className="mb-16">
               <SummaryPreview
                 summary={completedRecording.summary || "요약을 생성하지 못했습니다"}
