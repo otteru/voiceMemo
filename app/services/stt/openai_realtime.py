@@ -147,6 +147,8 @@ class OpenAIRealtimeProvider(STTProvider):
                     if result is None:
                         break
                     yield result
+            except asyncio.CancelledError:
+                pass  # 서버 종료(Ctrl+C) 시 result_queue 대기 취소 에러 무시
             finally:
                 send_task.cancel()
                 recv_task.cancel()

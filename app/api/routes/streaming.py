@@ -96,4 +96,7 @@ async def streaming_stt(websocket: WebSocket) -> None:
     except Exception:
         await audio_queue.put(None)
     finally:
-        await relay_task
+        try:
+            await relay_task
+        except asyncio.CancelledError:
+            pass  # 서버 종료(Ctrl+C) 시 relay_task 취소 에러 무시
