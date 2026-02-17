@@ -1,13 +1,18 @@
+"""Return Zero STT 프로바이더"""
+
+import asyncio
+import json
+from datetime import datetime
+from typing import AsyncGenerator, Dict, Any, Optional
+
 import httpx
 import websockets
-import json
-import asyncio
-from typing import Dict, Any, Optional, AsyncGenerator
-from datetime import datetime
+
+from app.services.stt.base import STTProvider
 
 
-class RTZRClient:
-    """Return Zero 스트리밍 STT API 클라이언트"""
+class ReturnZeroProvider(STTProvider):
+    """Return Zero 스트리밍 STT 프로바이더"""
 
     AUTH_URL = "https://openapi.vito.ai/v1/authenticate"
     WEBSOCKET_URL = "wss://openapi.vito.ai/v1/transcribe:streaming"
@@ -19,11 +24,7 @@ class RTZRClient:
         self.token_expire_at: Optional[datetime] = None
 
     async def _get_token(self) -> str:
-        """
-        JWT 토큰 발급
-        토큰 유효기간: 6시간
-        """
-        # 토큰이 유효하면 재사용
+        """JWT 토큰 발급 (6시간 캐싱)"""
         if self.access_token and self.token_expire_at:
             if datetime.now() < self.token_expire_at:
                 return self.access_token
@@ -42,74 +43,55 @@ class RTZRClient:
             data = response.json()
             token: str = data["access_token"]
             self.access_token = token
-            # expire_at은 타임스탬프 (밀리초)
             self.token_expire_at = datetime.fromtimestamp(data["expire_at"] / 1000)
-
-            print(f"✅ 토큰 발급 완료 (만료: {self.token_expire_at})")
             return token
 
     async def stream_transcribe(
         self,
         audio_stream: AsyncGenerator[bytes, None],
-        sample_rate: int = 16000,
+        sample_rate: int = 24000,
         encoding: str = "LINEAR16",
-        use_itn: bool = True,
-        use_disfluency_filter: bool = False,
     ) -> AsyncGenerator[Dict[str, Any], None]:
-        """
-        실시간 스트리밍 STT
-
-        Args:
-            audio_stream: 오디오 데이터 스트림 (비동기 제너레이터)
-            sample_rate: 샘플링 레이트 (8000~48000 Hz)
-            encoding: 오디오 인코딩 (LINEAR16, FLAC, OPUS 등)
-            use_itn: 역정규화 사용 (숫자를 아라비아 숫자로)
-            use_disfluency_filter: 불안정 필터 (음, 어 등 제거)
-
-        Yields:
-            STT 결과 (JSON)
-        """
+        """실시간 스트리밍 STT (정규화된 결과 반환)"""
         token = await self._get_token()
 
-        # WebSocket URL에 쿼리 파라미터 추가
         ws_url = (
             f"{self.WEBSOCKET_URL}"
             f"?sample_rate={sample_rate}"
             f"&encoding={encoding}"
-            f"&use_itn={'true' if use_itn else 'false'}"
-            f"&use_disfluency_filter={'true' if use_disfluency_filter else 'false'}"
+            f"&use_itn=true"
+            f"&use_disfluency_filter=true"
         )
 
-        # WebSocket 연결
         async with websockets.connect(
             ws_url,
             extra_headers={"Authorization": f"Bearer {token}"},
-        ) as websocket:
-            print("✅ WebSocket 연결 완료")
+        ) as ws:
 
-            # 오디오 전송 태스크
             async def send_audio():
                 try:
-                    async for audio_chunk in audio_stream:
-                        # 바이너리 메시지로 오디오 전송
-                        await websocket.send(audio_chunk)
-
-                    # 스트림 종료 신호
-                    await websocket.send("EOS")
-                    print("✅ 오디오 전송 완료 (EOS)")
+                    async for chunk in audio_stream:
+                        await ws.send(chunk)
+                    await ws.send("EOS")
                 except Exception as e:
-                    print(f"❌ 오디오 전송 오류: {e}")
+                    print(f"Return Zero 오디오 전송 오류: {e}")
 
-            # 결과 수신 태스크
             async def receive_results():
                 try:
-                    async for message in websocket:
+                    async for message in ws:
                         result = json.loads(message)
-                        yield result
+                        alternatives = result.get("alternatives", [])
+                        text = alternatives[0].get("text", "") if alternatives else ""
+                        yield {
+                            "seq": result.get("seq", 0),
+                            "final": result.get("final", False),
+                            "text": text,
+                            "start_at": result.get("start_at", 0),
+                            "duration": result.get("duration", 0),
+                        }
                 except Exception as e:
-                    print(f"❌ 결과 수신 오류: {e}")
+                    print(f"Return Zero 결과 수신 오류: {e}")
 
-            # 동시 실행
             send_task = asyncio.create_task(send_audio())
 
             async for result in receive_results():
@@ -121,23 +103,12 @@ class RTZRClient:
         self,
         audio_file_path: str,
         chunk_size: int = 1024,
-        sample_rate: int = 16000,
+        sample_rate: int = 24000,
         encoding: str = "LINEAR16",
     ) -> list[Dict[str, Any]]:
-        """
-        오디오 파일을 스트리밍으로 전사
+        """오디오 파일을 스트리밍으로 전사 (테스트/유틸용)"""
 
-        Args:
-            audio_file_path: 오디오 파일 경로
-            chunk_size: 청크 크기 (바이트)
-            sample_rate: 샘플링 레이트
-            encoding: 오디오 인코딩
-
-        Returns:
-            전사 결과 리스트
-        """
         async def file_stream():
-            """파일을 청크로 읽어서 스트림으로 전달"""
             with open(audio_file_path, "rb") as f:
                 while True:
                     chunk = f.read(chunk_size)
@@ -152,10 +123,7 @@ class RTZRClient:
             encoding=encoding,
         ):
             results.append(result)
-
-            # final=True인 결과만 출력
-            if result.get("final"):
-                text = result.get("alternatives", [{}])[0].get("text", "")
-                print(f"📝 {text}")
+            if result.get("final") and result.get("text"):
+                print(f"  {result['text']}")
 
         return results

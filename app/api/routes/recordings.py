@@ -19,7 +19,6 @@ from app.schemas.recording import (
     RecordingStatusResponse,
 )
 from app.services.llm_summarizer import LectureSummarizer
-from app.services.rtzr_client import RTZRClient
 
 router = APIRouter()
 
@@ -76,27 +75,11 @@ async def process_recording(recording_id: str, audio_path: str) -> None:
                     print(f"❌ ffmpeg 변환 실패: {e.stderr.decode()}")
                     raise e
 
-            # 2단계: STT
+            # 2단계: STT (업로드 모드 비활성화 — 실시간 모드만 지원)
             recording.progress = 20
             await db.commit()
 
-            stt_client = RTZRClient(
-                client_id=settings.return_zero_client_id,
-                client_secret=settings.return_zero_client_secret,
-            )
-            results = await stt_client.transcribe_file(
-                audio_file_path=str(opus_path),  # 변환된 Opus 파일 사용
-                chunk_size=8192,
-                sample_rate=48000,  # Opus는 보통 48kHz
-                encoding="OGG_OPUS",
-            )
-
-            # STT 결과 텍스트 추출
-            stt_text = " ".join(
-                r.get("alternatives", [{}])[0].get("text", "")
-                for r in results
-                if r.get("final")
-            )
+            stt_text = "(업로드 모드 STT는 현재 비활성화되었습니다. 실시간 모드를 사용해주세요.)"
             recording.stt_text = stt_text
             recording.progress = 50
             await db.commit()

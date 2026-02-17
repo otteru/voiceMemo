@@ -3,14 +3,14 @@
  * 마이크 오디오를 Int16 PCM으로 변환하여 메인 스레드로 전송
  *
  * process()는 128 샘플(프레임) 단위로 호출됨
- * 16kHz에서 128 샘플 = 8ms → 너무 잦은 전송 방지를 위해
- * 내부 버퍼에 모아서 ~100ms(1600 샘플) 단위로 전송
+ * 24kHz에서 128 샘플 = ~5.3ms → 너무 잦은 전송 방지를 위해
+ * 내부 버퍼에 모아서 ~100ms(2400 샘플) 단위로 전송
  */
 class PCMProcessor extends AudioWorkletProcessor {
   constructor() {
     super()
     this._buffer = new Float32Array(0)
-    this._bufferSize = 1600 // 16kHz * 0.1s = 1600 samples
+    this._bufferSize = 2400 // 24kHz * 0.1s = 2400 samples
   }
 
   process(inputs) {

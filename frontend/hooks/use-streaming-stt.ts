@@ -3,7 +3,7 @@
 import { useState, useRef, useCallback } from "react"
 import { WS_BASE_URL } from "@/lib/api"
 
-const SAMPLE_RATE = 16000
+const SAMPLE_RATE = 24000
 
 /** 전사 세그먼트 (final 확정된 결과) */
 export interface TranscriptSegment {

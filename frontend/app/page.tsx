@@ -89,31 +89,30 @@ export default function Home() {
     }
   }, [streamingState, recordingMode, appState])
 
-  // eos_ack 수신 후 최종 보고서 표시 (실시간 모드)
+  // eos_ack 수신 후 남은 세그먼트로 최종 보고서 생성
   useEffect(() => {
     if (!pendingFinalRef.current) return
     if (streamingState !== "idle") return
+    if (isGenerating) return // 진행 중인 보고서 생성 완료 대기
 
     pendingFinalRef.current = false
 
-    if (currentReport.trim()) {
-      setAppState("complete")
-      toast.success("강의 정리가 완료되었습니다")
-    } else if (finalText.trim()) {
-      // 보고서가 아직 없으면 (3분 미만 녹음) 마지막 트리거 시도
-      triggerReport(segments).then((success) => {
-        if (success) {
-          setAppState("complete")
-          toast.success("강의 정리가 완료되었습니다")
-        } else {
-          setAppState("idle")
-          toast.info("녹음이 너무 짧아 보고서를 생성하지 못했습니다")
-        }
-      })
-    } else {
+    if (!finalText.trim()) {
       setAppState("idle")
+      return
     }
-  }, [streamingState, currentReport, finalText, segments, triggerReport])
+
+    // 남은 세그먼트로 최종 보고서 트리거 (기존 보고서가 있어도 시도)
+    triggerReport(segments).then((generated) => {
+      if (generated || currentReport.trim()) {
+        setAppState("complete")
+        toast.success("강의 정리가 완료되었습니다")
+      } else {
+        setAppState("idle")
+        toast.info("녹음이 너무 짧아 보고서를 생성하지 못했습니다")
+      }
+    })
+  }, [streamingState, finalText, segments, triggerReport, currentReport, isGenerating])
 
   // Backend 세션에서 Notion 연결 상태 확인
   useEffect(() => {

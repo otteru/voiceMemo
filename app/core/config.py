@@ -5,9 +5,15 @@ from typing import Optional
 class Settings(BaseSettings):
     """환경변수 설정"""
 
+    # STT 프로바이더 선택: "return_zero" | "openai"
+    stt_provider: str = "openai"
+
     # Return Zero API
-    return_zero_client_id: str
-    return_zero_client_secret: str
+    return_zero_client_id: Optional[str] = None
+    return_zero_client_secret: Optional[str] = None
+
+    # OpenAI API (Realtime Transcription)
+    openai_api_key: Optional[str] = None
 
     # OpenRouter API
     openrouter_api_key: str
