@@ -67,6 +67,7 @@ class OpenAIRealtimeProvider(STTProvider):
             item_seq_map: Dict[str, int] = {}
             item_delta_buf: Dict[str, str] = {}
             result_queue: asyncio.Queue[Optional[Dict[str, Any]]] = asyncio.Queue()
+            send_done = asyncio.Event()  # send_audio 완료 신호
 
             async def send_audio():
                 """오디오 청크를 base64로 인코딩하여 전송"""
@@ -87,6 +88,8 @@ class OpenAIRealtimeProvider(STTProvider):
                     pass
                 except Exception as e:
                     print(f"OpenAI 오디오 전송 오류: {e}")
+                finally:
+                    send_done.set()  # 오디오 전송 완료 알림
 
             async def receive_results():
                 """OpenAI 이벤트 수신 및 정규화"""
@@ -128,6 +131,11 @@ class OpenAIRealtimeProvider(STTProvider):
                                 "duration": 0,
                             })
                             item_delta_buf.pop(item_id, None)
+
+                            # 오디오 전송 완료 + pending 아이템 없음 → 종료
+                            if send_done.is_set() and not item_delta_buf:
+                                await ws.close()
+                                return
 
                         elif event_type == "error":
                             error_msg = event.get("error", {}).get("message", "Unknown error")
