@@ -19,7 +19,8 @@ voiceMemo/
 │   │   │   ├── __init__.py        # 팩토리 (get_stt_provider, STT_PROVIDER 환경변수)
 │   │   │   ├── base.py            # 공통 인터페이스 (STTProvider ABC)
 │   │   │   ├── openai_realtime.py # OpenAI Realtime Transcription 프로바이더
-│   │   │   └── return_zero.py     # Return Zero STT 프로바이더
+│   │   │   ├── return_zero.py     # Return Zero STT 프로바이더
+│   │   │   └── whisper_live.py    # WhisperLive 로컬 STT 프로바이더 (NEW)
 │   │   ├── llm_summarizer.py      # LLM 서비스 (summarize_async + generate_progressive_report_async)
 │   │   └── notion_client.py       # Notion API 클라이언트
 │   ├── schemas/
@@ -29,7 +30,7 @@ voiceMemo/
 │   ├── models/
 │   │   └── recording.py           # Recording DB 모델
 │   └── core/
-│       ├── config.py              # 환경변수 설정 (stt_provider, openai_api_key 등)
+│       ├── config.py              # 환경변수 설정 (stt_provider, whisper_live_server_url 등)
 │       ├── security.py            # 세션 관리 (httpOnly 쿠키)
 │       └── database.py            # SQLAlchemy 비동기 ORM
 ├── tests/
@@ -38,7 +39,13 @@ voiceMemo/
 │   ├── test_notion_unit.py        # NotionService 단위 테스트 (모킹)
 │   ├── test_notion.py             # Notion 실제 API 연동 테스트 (.env 사용)
 │   ├── test_stt.py                # STT 수동 테스트 (스크립트)
-│   └── test_llm_summary.py        # LLM 수동 테스트 (스크립트)
+│   ├── test_llm_summary.py        # LLM 수동 테스트 (스크립트)
+│   └── stt_benchmark/             # STT 벤치마크 테스트 (4개 모델 비교)
+│       ├── run_all.py             # 4개 모델 순차 실행 + 결과 비교
+│       ├── test_return_zero.py    # Return Zero STT 벤치마크
+│       ├── test_openai_whisper.py # OpenAI Whisper API 벤치마크
+│       ├── test_naver_clova.py    # Naver CLOVA Speech 벤치마크
+│       └── test_whisper_live.py   # WhisperLive 로컬 STT 벤치마크
 ├── frontend/
 │   ├── app/
 │   │   ├── page.tsx               # 메인 페이지 (듀얼 패널 + 점진적 보고서 통합 완료)
@@ -66,7 +73,12 @@ voiceMemo/
 │       ├── summary-preview.tsx    # 요약 미리보기
 │       ├── feature-card.tsx       # 기능 카드
 │       └── header.tsx             # 헤더
-├── docs/                          # 문서 (STT 모델 참고, 미래 계획 등)
+├── docs/                          # 문서 (STT 모델 참고, BM 분석 등)
+│   └── Project.md                 # 프로젝트 기획 + BM 분석
+├── outputs/
+│   ├── audio/test_audio.wav       # STT 벤치마크 테스트 음원 (16MB)
+│   └── stt/                       # STT 결과 파일
+│       └── whisper_live_result.txt # WhisperLive 테스트 결과
 ├── pyproject.toml                 # pytest 설정 (pythonpath)
 ├── requirements.txt               # Python 의존성
 ├── CLAUDE.md                      # 프로젝트 개요
@@ -75,68 +87,132 @@ voiceMemo/
 
 ## 완료된 작업
 
-### 인프라 (2026-02-07)
-- [x] FastAPI 앱 구조 (main.py, CORS, 세션 미들웨어, lifespan)
-- [x] SQLAlchemy 비동기 ORM (SQLite)
-- [x] httpOnly 쿠키 세션 관리
+### 인프라 ~ 듀얼 패널 (2026-02-05 ~ 14)
+- [x] FastAPI 앱 구조 + SQLAlchemy + 세션 관리
+- [x] Recordings/Notion/Streaming/Report API
+- [x] Return Zero / OpenAI Realtime STT 프로바이더
+- [x] 실시간 WebSocket STT + AudioWorklet
+- [x] 듀얼 패널 + 점진적 보고서 UI
+- [x] 에러 수정 (Ctrl+C 종료, 녹음 중지 버그)
 
-### Backend API (2026-02-07)
-- [x] Recordings API (CRUD + 백그라운드 처리)
-- [x] Notion API (config, status, disconnect, save)
-- [x] Return Zero 스트리밍 STT (OGG_OPUS)
-- [x] LangChain + OpenRouter LLM 요약
+### BM 분석 + 로컬 STT 리서치 (2026-02-18, 이전 세션)
+- [x] STT API 비용 분석 (OpenAI, Google, Deepgram, Naver 등 비교)
+- [x] BM 실현 가능성 검토 → API 기반은 마진 25% (너무 낮음)
+- [x] 오픈소스 STT 솔루션 리서치 (WhisperLive, Vosk, SenseVoice, FunASR, 한국어 fine-tuned Whisper)
+- [x] AWS 셀프호스팅 비용 분석 → 50명+ 유저 시 60-70% 마진 가능
+- [x] WhisperLive 벤치마크 테스트 코드 작성 + 실행 성공
 
-### Frontend 기본 (2026-02-05 ~ 07)
-- [x] 녹음 UI (MediaRecorder, Ogg Opus 우선)
-- [x] 설정 페이지 (Notion 연동)
-- [x] 상태 폴링 (2초 간격)
-- [x] Zod 검증, 타입 정의, API 레이어
+### WhisperLive 프로바이더 통합 (2026-02-18, 이번 세션)
+- [x] WhisperLiveProvider 구현 (`app/services/stt/whisper_live.py`)
+  - STTProvider ABC 상속, stream_transcribe() 구현
+  - 누적 응답(lines 배열) → 증분 결과(seq/final/text) 변환 로직
+  - 24kHz → 16kHz PCM 리샘플링 (Whisper 모델 요구사항)
+  - 타임스탬프 문자열 파싱 (`"0:01:23"` → float 초)
+- [x] 팩토리에 `"whisper_live"` 분기 추가 (`app/services/stt/__init__.py`)
+- [x] config에 `whisper_live_server_url`, `whisper_live_recv_timeout` 추가
+- [x] 통합 테스트 성공 (프론트 → 백엔드 → WhisperLive 서버 → 실시간 전사 표시)
 
-### Notion URL 입력 방식 변경 (2026-02-10)
-- [x] Database ID 직접 입력 → Notion 페이지 URL 붙여넣기 방식으로 변경
+## 진행 중인 작업
 
-### Notion 자동 저장 + 테스트 + 버그 수정 (2026-02-10)
-- [x] STT → AI 요약 → Notion 저장 파이프라인 완성 (업로드 모드)
-- [x] pytest 테스트 환경 구축
-
-### 실시간 스트리밍 STT (2026-02-12 ~ 13)
-- [x] WebSocket 릴레이 엔드포인트 + AudioWorklet PCM 캡처
-- [x] use-streaming-stt.ts 스트리밍 훅
-- [x] live-transcript.tsx 실시간 전사 UI + mode-selector.tsx 모드 토글
-- [x] page.tsx 스트리밍 모드 통합
-
-### 듀얼 패널 + 점진적 보고서 (2026-02-14)
-- [x] 백엔드 보고서 엔드포인트 (`POST /api/report/progressive`)
-- [x] 프론트엔드 API 레이어 + 타입
-- [x] 점진적 보고서 훅 + 듀얼 패널 UI
-- [x] page.tsx 전체 통합 (3분 타이머, pendingFinalRef, 최종 보고서 화면)
-
-### STT 프로바이더 추상화 + OpenAI 전환 (2026-02-16)
-- [x] STT 프로바이더 추상화 (base.py → factory → openai/return_zero)
-- [x] OpenAI Realtime Transcription API 프로바이더 구현
-- [x] 환경변수 `STT_PROVIDER`로 프로바이더 전환 지원 (기본값: `"openai"`)
-- [x] 기본 sample rate 24000Hz로 전체 통일
-- [x] AudioWorklet 버퍼 사이즈 2400 샘플 (24kHz * 0.1s)로 수정
-- [x] WebSocket URL: `?intent=transcription` (모델은 session.update에서 지정)
-- [x] session.update에 `"type": "transcription"` 필수 파라미터 추가
-- [x] `websockets==12.0` 호환: `extra_headers` 사용 (v13+는 `additional_headers`)
-- [x] 업로드 모드 STT 비활성화 (recordings.py에서 RTZRClient import 제거)
-- [x] 빈 버퍼 commit 에러 핸들링 (server_vad 이미 커밋 시 무해한 에러)
-- [x] HANDOFF.md 업데이트
-- [x] E2E 테스트 완료
+### WhisperLive 품질/안정성 개선 (60% 완료)
+- **현재 상태**: 연동 동작 확인, small 모델 한국어 인식 정확도 낮음
+- **확인된 문제**:
+  1. Whisper small 모델 한국어 오인식 다수 (예: "그림을 부동가기 시작했습니다")
+  2. 빠르게 말하면 VAD가 구간을 못 나눠서 이탤릭(interim)만 계속 늘어남
+  3. 녹음 중지 시 종료까지 시간이 걸릴 수 있음 (recv_timeout 대기)
+- **해결 방향**:
+  - `--buffer_trimming sentence` 옵션으로 문장 단위 분할
+  - `large-v3` 모델 또는 한국어 fine-tuned 모델로 정확도 개선
+  - `mlx-whisper` 설치로 Apple Silicon 속도 개선
 
 ## 다음에 해야 할 작업
 
-### 커밋 및 푸시
-- [ ] 현재 변경사항 커밋 (STT 추상화 + OpenAI 전환 + 듀얼 패널)
-- [ ] 브랜치 전략에 따라 feature 브랜치 생성 후 PR
+### 1. WhisperLive 인식 품질 개선 (최우선)
+- [ ] `pip install mlx-whisper` 설치 후 재테스트 (속도 개선 확인)
+- [ ] `--model large-v3` 로 large 모델 테스트
+- [ ] 한국어 fine-tuned 모델 테스트 (seastar105/Korean-Whisper 등)
+- [ ] `--buffer_trimming sentence --buffer_trimming_sec 15` 옵션 효과 확인
 
-### 개선 가능 항목
-- [ ] 업로드 모드 복구 (OpenAI Whisper API 또는 Return Zero 사용)
-- [ ] 보고서 생성 프롬프트 튜닝 (강의 특성에 맞게)
-- [ ] 보고서 갱신 주기 조절 UI (현재 3분 고정)
-- [ ] WebSocket 재연결 로직
-- [ ] 모바일 UX 개선
+### 2. WhisperLive 녹음 종료 안정성
+- [ ] 녹음 중지 시 recv_timeout 동안 서버가 빈 응답을 계속 보내면 종료가 지연되는 문제
+- [ ] drain_deadline 패턴 적용 (send_done 이후 절대 시간 기반 종료)
+
+### 3. STT 벤치마크 전체 비교
+- [ ] `python -m tests.stt_benchmark.run_all` 로 4개 모델 동시 비교
+- [ ] 비교 항목: 인식 정확도, 속도, 비용
+
+### 4. BM 결정
+- [ ] 로컬 STT 품질이 서비스 가능 수준인지 판단
+- [ ] API vs 셀프호스팅 최종 결정
+- [ ] 가격 정책 확정
+
+### 5. 기존 버그/개선
+- [ ] E2E 테스트 (녹음 → 중지 → eos_ack 확인)
+- [ ] UI 리디자인
+
+## 주의사항
+
+### WhisperLive 서버 실행 방법 (터미널 3개 필요)
+```bash
+# 터미널 1: WhisperLive STT 서버 (포트 9090)
+whisperlivekit-server --model small --language ko --port 9090 --pcm-input \
+  --buffer_trimming sentence --buffer_trimming_sec 15
+
+# 터미널 2: FastAPI 백엔드 (포트 8000)
+uvicorn app.main:app --reload
+
+# 터미널 3: Next.js 프론트엔드 (포트 3000)
+cd frontend && npm run dev
+```
+
+### WhisperLive 환경변수 (.env)
+```env
+STT_PROVIDER=whisper_live
+WHISPER_LIVE_SERVER_URL=ws://localhost:9090/asr
+```
+
+### WhisperLive 프로토콜 (중요)
+- 서버는 WebSocket `/asr` 엔드포인트에서 **바이트만** 수신
+- JSON 메시지를 보내면 에러 발생 → 연결 종료됨
+- 연결 직후 서버가 config JSON을 먼저 보냄 (`{"type": "config", "useAudioWorklet": true}`)
+- 클라이언트는 PCM Int16 바이트를 전송 (16kHz, `--pcm-input` 필수)
+- 서버 응답 형식: `{"status": "...", "lines": [...], "buffer_transcription": "..."}`
+  - `lines[].text`: 전사 텍스트
+  - `lines[].start`/`end`: 타임스탬프 (`"0:01:23"` 형식 문자열)
+  - `lines[].speaker`: 화자 번호
+- 서버는 매번 **전체 누적 결과**를 보냄 → 이전과 비교하여 새 부분만 추출
+- 프론트엔드가 24kHz PCM을 보내면 WhisperLiveProvider가 16kHz로 리샘플링
+
+### WhisperLive 벤치마크 테스트 (파일 기반)
+```bash
+# 1. 서버 실행 (별도 터미널, --pcm-input 불필요 - WAV 파일은 헤더 포함)
+whisperlivekit-server --model small --language ko --port 9090
+
+# 2. 테스트 실행
+python -m tests.stt_benchmark.test_whisper_live
+
+# 결과 파일: outputs/stt/whisper_live_result.txt
+```
+
+### 포트 충돌 주의
+- WhisperLive와 FastAPI 모두 기본 포트 8000 사용
+- WhisperLive를 `--port 9090`으로 실행하고 `WHISPER_LIVE_SERVER_URL=ws://localhost:9090/asr` 설정 필수
+
+### BM 핵심 수치 (docs/Project.md)
+- OpenAI Whisper: $0.006/분, gpt-4o-mini STT: $0.003/분
+- 학생 월 50~80시간 강의 → API 비용 $9~$28.8/월
+- API 기반 판매가 2만원 시 마진 ~25% (불가)
+- 셀프호스팅 (AWS g4dn.xlarge $0.53/hr): 50명+ 시 60-70% 마진
+
+### 환경 의존성
+- **ffmpeg 필수**: `brew install ffmpeg`
+- **Python 환경**: conda `fastapi`, Python 3.13
+- **WhisperLive**: `pip install "whisperlivekit[mlx-whisper]"` (MLX 권장)
+- **Node 환경**: Next.js 16, React 19
+
+### 보안
+- `.env` 파일 절대 커밋 금지
+- Notion 토큰은 httpOnly 쿠키 세션으로 관리
 
 ## 아키텍처
 
@@ -149,110 +225,32 @@ voiceMemo/
 ```
 
 ### STT 프로바이더 추상화
-- `STT_PROVIDER` 환경변수로 전환 (`"openai"` | `"return_zero"`, 기본값: `"openai"`)
-- 공통 인터페이스: `stream_transcribe(audio_stream, sample_rate, encoding)` → `{seq, final, text, start_at, duration}`
-- OpenAI: Realtime Transcription API (server_vad, gpt-4o-mini-transcribe)
-  - WebSocket URL: `wss://api.openai.com/v1/realtime?intent=transcription`
-  - session.update에 `"type": "transcription"` 필수
-  - server_vad가 침묵 감지 시 자동 커밋 → committed → delta → completed 이벤트 순서
+- `STT_PROVIDER` 환경변수로 전환 (`"openai"` | `"return_zero"` | `"whisper_live"`, 기본값: `"openai"`)
+- OpenAI: Realtime Transcription API (server_vad, gpt-4o-mini-transcribe, 24kHz)
 - Return Zero: VITO 스트리밍 STT (JWT 토큰 자동 재발급)
+- WhisperLive: 로컬 Whisper 서버 (WebSocket `/asr`, 16kHz PCM, 누적→증분 변환)
 
-### OpenAI Realtime 이벤트 흐름
+### WhisperLive 데이터 흐름
 ```
-클라이언트: input_audio_buffer.append (오디오 계속 전송)
-서버(VAD): input_audio_buffer.committed (발화 끝 감지 → 자동 커밋)
-서버: conversation.item.input_audio_transcription.delta (실시간 부분 텍스트)
-서버: conversation.item.input_audio_transcription.completed (최종 확정 텍스트)
-```
-
-### EOS 전파 흐름
-```
-Stop 클릭 → AudioWorklet disconnect → 마이크 정리
-→ {"type":"eos"} 전송 → Backend Queue에 None
-→ stream_transcribe() 종료 → STT 프로바이더 잔여 처리
-→ 최종 결과 릴레이 → {"type":"eos_ack"} → Frontend idle
-→ pendingFinalRef 감지 → 최종 보고서 화면 표시
+브라우저(24kHz PCM) → 백엔드(/ws/stt) → WhisperLiveProvider
+                                         ├── 24kHz→16kHz 리샘플링
+                                         ├── WhisperLive 서버(:9090/asr)로 전송
+                                         ├── 누적 응답 수신 (lines 배열)
+                                         └── 증분 결과로 변환 (seq/final/text)
+                                       → 프론트에 JSON 중계
 ```
 
-### 핵심 기술 결정사항
-- **오디오 포맷**: AudioWorklet + LINEAR16 (PCM), 24000 Hz
-- **STT**: OpenAI Realtime Transcription API (기본), Return Zero (전환 가능)
-- **보고서 용어**: "요약"이 아닌 "보고서/정리본" (시험 준비용 상세 내용 보존)
-- **보고서 형식**: 하이브리드 (핵심 키워드 + 주요 내용 + 중요 포인트)
-- **최종 출력**: 마지막 점진적 보고서를 그대로 사용 (별도 final LLM 호출 없음)
-- **저장 방식**: DB 저장 없이 사용자가 Notion 저장 또는 클립보드 복사 선택
-- **업로드 모드**: STT 비활성화 상태 (UI는 남아있으나 실제 전사 안 됨)
-
-## 주의사항
-
-### 환경 의존성
-- **ffmpeg 필수**: `brew install ffmpeg` (오디오 변환용)
-- **Python 환경**: conda `fastapi`, Python 3.13
-- **Node 환경**: Next.js 16, React 19
-
-### 외부 API 제약
-- **OpenAI**: Realtime Transcription API, 24kHz PCM, server_vad 모드
-- **Return Zero**: 토큰 6시간 유효 (자동 재발급), 스트리밍은 LINEAR16 24kHz 사용
-- **OpenRouter**: 무료 모델 `arcee-ai/trinity-large-preview:free`, rate limit 주의
-- **Notion**: Integration 연결 필수, `ntn_`으로 시작하는 토큰, 블록 최대 100개/요청
-
-### websockets 버전 주의
-- `websockets==12.0` 사용 중 → `extra_headers` 파라미터
-- v13+ 업그레이드 시 `additional_headers`로 변경 필요
-
-### 보안
-- `.env` 파일 절대 커밋 금지
-- Notion 토큰은 httpOnly 쿠키 세션으로 관리
-
-## API 엔드포인트
-
-### Recordings (업로드 모드 STT 비활성화)
-```
-POST   /api/recordings              - 오디오 업로드 (STT 비활성화됨)
-GET    /api/recordings              - 목록 조회
-GET    /api/recordings/{id}         - 상세 조회
-GET    /api/recordings/{id}/status  - 처리 상태 폴링
-DELETE /api/recordings/{id}         - 삭제
-```
-
-### Notion
-```
-GET    /api/notion/status           - 연결 상태 확인
-POST   /api/notion/config           - 설정 저장 (token + pageUrl)
-POST   /api/notion/disconnect       - 연결 해제
-POST   /api/notion/save             - 요약 → Notion 페이지 생성
-```
-
-### Report
-```
-POST   /api/report/progressive      - 점진적 보고서 갱신 (3분마다 호출)
-```
-
-### Streaming
-```
-WS     /ws/stt                      - 실시간 스트리밍 STT WebSocket
-```
-
-## 서버 실행 방법
-```bash
-# Backend (터미널 1)
-conda activate fastapi
-uvicorn app.main:app --reload --port 8000
-
-# Frontend (터미널 2)
-cd frontend
-npm run dev
-```
-- Backend: http://localhost:8000 (Swagger: http://localhost:8000/docs)
-- Frontend: http://localhost:3000
+## 관련 파일 (이번 세션에서 생성/수정)
+- `app/services/stt/whisper_live.py` - WhisperLive STT 프로바이더 (NEW)
+- `app/services/stt/__init__.py` - 팩토리에 whisper_live 분기 추가
+- `app/core/config.py` - whisper_live_server_url, recv_timeout 설정 추가
 
 ## 마지막 상태
-- **날짜**: 2026-02-16
+- **날짜**: 2026-02-18
 - **브랜치**: main
-- **마지막 커밋**: `ee8e105` Feat: dual-pannel 구현
-- **빌드 상태**: 성공 (Next.js 빌드 통과, 백엔드 import 정상)
-- **테스트 상태**: E2E 테스트 완료
-- **진행 상태**: STT 추상화 + OpenAI 전환 완료 / 미커밋 상태
+- **마지막 커밋**: `ac5352c` Fix: 녹음 중지 안되는 에러 수정
+- **미커밋 변경**: whisper_live.py(NEW), __init__.py, config.py, HANDOFF.md
+- **WhisperLive 연동**: 동작 확인 (small 모델, 한국어 인식 정확도 낮음)
 
 ## 새 세션 시작
 ```

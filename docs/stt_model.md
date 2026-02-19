@@ -34,3 +34,8 @@ https://developers.openai.com/api/docs/pricing/
 비용 : 스트리밍 기준 15초 당 5원 -> 분당 20원 -> 시간 당 1200원
 https://api.ncloud-docs.com/docs/ai-application-service-clovaspeech-grpc
 https://www.ncloud.com/v2/product/aiService/clovaSpeech#pricing
+
+### Whisper Live (Open Source)
+
+
+https://github.com/collabora/WhisperLive

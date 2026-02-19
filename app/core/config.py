@@ -5,8 +5,8 @@ from typing import Optional
 class Settings(BaseSettings):
     """환경변수 설정"""
 
-    # STT 프로바이더 선택: "return_zero" | "openai"
-    stt_provider: str = "openai"
+    # STT 프로바이더 선택: "return_zero" | "openai" | "whisper_live"
+    stt_provider: str = "whisper_live"
 
     # Return Zero API
     return_zero_client_id: Optional[str] = None
@@ -14,6 +14,10 @@ class Settings(BaseSettings):
 
     # OpenAI API (Realtime Transcription)
     openai_api_key: Optional[str] = None
+
+    # WhisperLive (로컬 서버)
+    whisper_live_server_url: str = "ws://localhost:9090/asr"
+    whisper_live_recv_timeout: int = 15
 
     # OpenRouter API
     openrouter_api_key: str

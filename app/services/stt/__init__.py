@@ -27,4 +27,12 @@ def get_stt_provider() -> STTProvider:
             client_secret=settings.return_zero_client_secret,
         )
 
+    elif provider == "whisper_live":
+        from app.services.stt.whisper_live import WhisperLiveProvider
+
+        return WhisperLiveProvider(
+            server_url=settings.whisper_live_server_url,
+            recv_timeout=settings.whisper_live_recv_timeout,
+        )
+
     raise ValueError(f"지원하지 않는 STT 프로바이더: {provider}")
